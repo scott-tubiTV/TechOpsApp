@@ -5,8 +5,16 @@ import streamlit as st
 from genie_client import GenieClient
 
 GENIE_SPACES = {
-    "TechOps Tool": os.environ.get("GENIE_SPACE_TECHOPS", "01f0f656e427147884da9fe5344da78f"),
-    "Dupe Checker V2": os.environ.get("GENIE_SPACE_DUPE_CHECKER", "01f122f4e2921b7a9c28ef03d0812ee6"),
+    "TechOps Tool": {
+        "id": os.environ.get("GENIE_SPACE_TECHOPS", "01f0f656e427147884da9fe5344da78f"),
+        "description": "Content pipeline queries: ABF status, avails, metadata, policies, redeliveries",
+        "keywords": ["abf", "avail", "content", "policy", "metadata", "redelivery", "delivery", "import", "series", "episode", "movie", "partner", "titan", "assessment"],
+    },
+    "Dupe Checker V2": {
+        "id": os.environ.get("GENIE_SPACE_DUPE_CHECKER", "01f122f4e2921b7a9c28ef03d0812ee6"),
+        "description": "Duplicate title detection: upload CSV avails to check for existing titles and conflicts",
+        "keywords": ["dupe", "duplicate", "conflict", "csv", "upload", "check", "avails file", "overlap", "territory"],
+    },
 }
 
 st.set_page_config(
@@ -34,6 +42,20 @@ def get_user_email():
         return "unknown"
 
 
+def route_query(message: str) -> str:
+    """Rule-based router: pick the best Genie space for a given message."""
+    msg_lower = message.lower()
+    scores = {}
+    for name, config in GENIE_SPACES.items():
+        score = sum(1 for kw in config["keywords"] if kw in msg_lower)
+        scores[name] = score
+
+    best = max(scores, key=scores.get)
+    if scores[best] > 0:
+        return best
+    return list(GENIE_SPACES.keys())[0]
+
+
 def init_session_state():
     if "messages" not in st.session_state:
         st.session_state.messages = []
@@ -41,6 +63,8 @@ def init_session_state():
         st.session_state.conversation_id = None
     if "active_space" not in st.session_state:
         st.session_state.active_space = list(GENIE_SPACES.keys())[0]
+    if "auto_route" not in st.session_state:
+        st.session_state.auto_route = False
 
 
 def clear_conversation():
@@ -58,16 +82,22 @@ def main():
 
         st.divider()
 
-        selected_space = st.selectbox(
-            "Genie Space",
-            list(GENIE_SPACES.keys()),
-            index=list(GENIE_SPACES.keys()).index(st.session_state.active_space),
+        st.session_state.auto_route = st.toggle(
+            "Auto-route queries",
+            value=st.session_state.auto_route,
+            help="Automatically pick the best Genie space based on your question",
         )
 
-        if selected_space != st.session_state.active_space:
-            st.session_state.active_space = selected_space
-            clear_conversation()
-            st.rerun()
+        if not st.session_state.auto_route:
+            selected_space = st.selectbox(
+                "Genie Space",
+                list(GENIE_SPACES.keys()),
+                index=list(GENIE_SPACES.keys()).index(st.session_state.active_space),
+            )
+            if selected_space != st.session_state.active_space:
+                st.session_state.active_space = selected_space
+                clear_conversation()
+                st.rerun()
 
         st.divider()
 
@@ -77,15 +107,21 @@ def main():
 
         st.divider()
         st.caption("**Available Spaces:**")
-        for name in GENIE_SPACES:
+        for name, config in GENIE_SPACES.items():
             icon = "✅" if name == st.session_state.active_space else "○"
-            st.caption(f"{icon} {name}")
+            st.caption(f"{icon} **{name}**")
+            st.caption(f"   {config['description']}")
 
-    st.header(f"💬 {st.session_state.active_space}")
+    if st.session_state.auto_route:
+        st.header("💬 Content Ops Genie (Auto-routing)")
+    else:
+        st.header(f"💬 {st.session_state.active_space}")
 
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
+            if msg.get("routed_to"):
+                st.caption(f"🔀 Routed to: **{msg['routed_to']}**")
             if msg.get("sql"):
                 with st.expander("SQL Query"):
                     st.code(msg["sql"], language="sql")
@@ -99,46 +135,64 @@ def main():
         with st.chat_message("user"):
             st.markdown(prompt)
 
+        if st.session_state.auto_route:
+            routed_space = route_query(prompt)
+            if routed_space != st.session_state.active_space:
+                st.session_state.active_space = routed_space
+                st.session_state.conversation_id = None
+        else:
+            routed_space = st.session_state.active_space
+
         with st.chat_message("assistant"):
-            with st.spinner("Querying Genie..."):
+            with st.spinner(f"Querying {routed_space}..."):
                 client = get_genie_client()
-                space_id = GENIE_SPACES[st.session_state.active_space]
+                space_id = GENIE_SPACES[routed_space]["id"]
 
-                response = client.ask(
-                    space_id=space_id,
-                    message=prompt,
-                    conversation_id=st.session_state.conversation_id,
-                )
+                try:
+                    response = client.ask(
+                        space_id=space_id,
+                        message=prompt,
+                        conversation_id=st.session_state.conversation_id,
+                    )
 
-                parsed = client.parse_response(response)
-                st.session_state.conversation_id = parsed["conversation_id"]
+                    parsed = client.parse_response(response)
+                    st.session_state.conversation_id = parsed["conversation_id"]
 
-                if parsed["status"] == "COMPLETED":
-                    answer = parsed["text"] or "Query completed but no text response was returned."
-                    st.markdown(answer)
+                    if parsed["status"] == "COMPLETED":
+                        answer = parsed["text"] or "Query completed but no text response was returned."
+                        st.markdown(answer)
 
-                    assistant_msg = {"role": "assistant", "content": answer}
+                        assistant_msg = {"role": "assistant", "content": answer}
 
-                    if parsed["sql"]:
-                        with st.expander("SQL Query"):
-                            st.code(parsed["sql"], language="sql")
-                        assistant_msg["sql"] = parsed["sql"]
+                        if st.session_state.auto_route:
+                            st.caption(f"🔀 Routed to: **{routed_space}**")
+                            assistant_msg["routed_to"] = routed_space
 
-                    if parsed["suggested_questions"]:
-                        st.caption("**Suggested questions:**")
-                        for q in parsed["suggested_questions"]:
-                            st.caption(f"• {q}")
-                        assistant_msg["suggestions"] = parsed["suggested_questions"]
+                        if parsed["sql"]:
+                            with st.expander("SQL Query"):
+                                st.code(parsed["sql"], language="sql")
+                            assistant_msg["sql"] = parsed["sql"]
 
-                elif parsed["status"] == "FAILED":
-                    error_text = "The query failed. Please try rephrasing your question."
+                        if parsed["suggested_questions"]:
+                            st.caption("**Suggested questions:**")
+                            for q in parsed["suggested_questions"]:
+                                st.caption(f"• {q}")
+                            assistant_msg["suggestions"] = parsed["suggested_questions"]
+
+                    elif parsed["status"] == "FAILED":
+                        error_text = "The query failed. Please try rephrasing your question."
+                        st.error(error_text)
+                        assistant_msg = {"role": "assistant", "content": error_text}
+
+                    else:
+                        timeout_text = "The query timed out. Try a simpler question or try again."
+                        st.warning(timeout_text)
+                        assistant_msg = {"role": "assistant", "content": timeout_text}
+
+                except Exception as e:
+                    error_text = f"Error communicating with Genie: {str(e)}"
                     st.error(error_text)
                     assistant_msg = {"role": "assistant", "content": error_text}
-
-                else:
-                    timeout_text = "The query timed out. Try a simpler question or try again."
-                    st.warning(timeout_text)
-                    assistant_msg = {"role": "assistant", "content": timeout_text}
 
                 st.session_state.messages.append(assistant_msg)
 

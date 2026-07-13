@@ -1,38 +1,36 @@
 """Genie API client for interacting with Databricks Genie spaces."""
 
 import time
-import requests
 from databricks.sdk import WorkspaceClient
 
 
 class GenieClient:
     def __init__(self):
         self.w = WorkspaceClient()
-        self.base_url = f"{self.w.config.host}/api/2.0/genie"
 
-    def _headers(self):
-        return {
-            "Authorization": f"Bearer {self.w.config.token}",
-            "Content-Type": "application/json",
-        }
+    def _do(self, method, path, body=None):
+        """Use the SDK's authenticated API client for all requests."""
+        return self.w.api_client.do(method, path, body=body)
 
     def start_conversation(self, space_id: str, message: str) -> dict:
-        url = f"{self.base_url}/spaces/{space_id}/start-conversation"
-        resp = requests.post(url, headers=self._headers(), json={"content": message})
-        resp.raise_for_status()
-        return resp.json()
+        return self._do(
+            "POST",
+            f"/api/2.0/genie/spaces/{space_id}/start-conversation",
+            body={"content": message},
+        )
 
     def get_message(self, space_id: str, conversation_id: str, message_id: str) -> dict:
-        url = f"{self.base_url}/spaces/{space_id}/conversations/{conversation_id}/messages/{message_id}"
-        resp = requests.get(url, headers=self._headers())
-        resp.raise_for_status()
-        return resp.json()
+        return self._do(
+            "GET",
+            f"/api/2.0/genie/spaces/{space_id}/conversations/{conversation_id}/messages/{message_id}",
+        )
 
     def send_followup(self, space_id: str, conversation_id: str, message: str) -> dict:
-        url = f"{self.base_url}/spaces/{space_id}/conversations/{conversation_id}/messages"
-        resp = requests.post(url, headers=self._headers(), json={"content": message})
-        resp.raise_for_status()
-        return resp.json()
+        return self._do(
+            "POST",
+            f"/api/2.0/genie/spaces/{space_id}/conversations/{conversation_id}/messages",
+            body={"content": message},
+        )
 
     def ask(self, space_id: str, message: str, conversation_id: str = None, timeout: int = 120) -> dict:
         """Send a message and poll until completion. Returns the full message response."""
