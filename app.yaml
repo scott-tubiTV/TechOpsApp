@@ -1,19 +1,14 @@
 command:
-  - uvicorn
-  - backend.main:app
-  - --host
-  - 0.0.0.0
-  - --port
+  - streamlit
+  - run
+  - app.py
+  - --server.port
   - "8000"
+  - --server.address
+  - 0.0.0.0
 
 env:
-  - name: DATABRICKS_WAREHOUSE_ID
-    value: f6585a1131b2b962
-  - name: UC_CATALOG
-    value: tubi_content_ops_catalog
-  - name: UC_SCHEMA
-    value: demo_schema
-  - name: LAKEBASE_PROJECT
-    value: tubi-content-ops
-  - name: LAKEBASE_DB
-    value: tubi_content_ops
+  - name: GENIE_SPACE_TECHOPS
+    value: "01f0f656e427147884da9fe5344da78f"
+  - name: GENIE_SPACE_DUPE_CHECKER
+    value: "01f122f4e2921b7a9c28ef03d0812ee6"
