@@ -173,6 +173,10 @@ def main():
                                 st.code(parsed["sql"], language="sql")
                             assistant_msg["sql"] = parsed["sql"]
 
+                        if parsed.get("error"):
+                            with st.expander("⚠️ Query Warning"):
+                                st.caption(parsed["error"])
+
                         if parsed["suggested_questions"]:
                             st.caption("**Suggested questions:**")
                             for q in parsed["suggested_questions"]:
@@ -180,13 +184,21 @@ def main():
                             assistant_msg["suggestions"] = parsed["suggested_questions"]
 
                     elif parsed["status"] == "FAILED":
-                        error_text = "The query failed. Please try rephrasing your question."
+                        error_detail = parsed.get("error") or "No additional detail available."
+                        error_text = f"The query failed: {error_detail}"
                         st.error(error_text)
+                        if parsed.get("text"):
+                            st.info(parsed["text"])
+                        with st.expander("Debug Info"):
+                            st.caption(f"Raw status: `{parsed.get('raw_status')}`")
+                            st.caption(f"Conversation ID: `{parsed.get('conversation_id')}`")
                         assistant_msg = {"role": "assistant", "content": error_text}
 
                     else:
                         timeout_text = "The query timed out. Try a simpler question or try again."
                         st.warning(timeout_text)
+                        with st.expander("Debug Info"):
+                            st.caption(f"Raw status: `{parsed.get('raw_status')}`")
                         assistant_msg = {"role": "assistant", "content": timeout_text}
 
                 except Exception as e:

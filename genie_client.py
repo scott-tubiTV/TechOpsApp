@@ -43,15 +43,31 @@ class GenieClient:
             msg_id = result["message_id"]
 
         start = time.time()
+        last_status = None
         while time.time() - start < timeout:
             msg = self.get_message(space_id, conversation_id, msg_id)
             status = msg.get("status", "")
-            if status in ("COMPLETED", "COMPLETED_WITH_ERROR", "ASKING_AI", "FAILED"):
+            last_status = status
+            if status in ("COMPLETED", "COMPLETED_WITH_ERROR", "FAILED"):
                 msg["conversation_id"] = conversation_id
                 return msg
+            if status == "ASKING_AI":
+                # ASKING_AI can be transitional or terminal — wait a bit more
+                # to see if it transitions to COMPLETED
+                time.sleep(3)
+                msg2 = self.get_message(space_id, conversation_id, msg_id)
+                status2 = msg2.get("status", "")
+                if status2 == "ASKING_AI":
+                    # Still ASKING_AI after extra wait — treat as terminal
+                    msg2["conversation_id"] = conversation_id
+                    return msg2
+                elif status2 in ("COMPLETED", "COMPLETED_WITH_ERROR", "FAILED"):
+                    msg2["conversation_id"] = conversation_id
+                    return msg2
+                # Otherwise keep polling
             time.sleep(2)
 
-        return {"status": "TIMEOUT", "conversation_id": conversation_id}
+        return {"status": "TIMEOUT", "conversation_id": conversation_id, "_last_status": last_status}
 
     def parse_response(self, msg: dict) -> dict:
         """Extract the useful parts from a Genie message response."""
@@ -59,9 +75,11 @@ class GenieClient:
         normalized_status = "COMPLETED" if raw_status in ("COMPLETED", "ASKING_AI", "COMPLETED_WITH_ERROR") else raw_status
         result = {
             "status": normalized_status,
+            "raw_status": raw_status,
             "conversation_id": msg.get("conversation_id"),
             "text": None,
             "sql": None,
+            "error": None,
             "suggested_questions": [],
         }
 
@@ -69,8 +87,14 @@ class GenieClient:
             if "text" in attachment:
                 result["text"] = attachment["text"].get("content")
             if "query" in attachment:
-                result["sql"] = attachment["query"].get("query")
+                query_info = attachment["query"]
+                result["sql"] = query_info.get("query")
+                if query_info.get("error"):
+                    result["error"] = query_info["error"]
             if "suggested_questions" in attachment:
                 result["suggested_questions"] = attachment["suggested_questions"].get("questions", [])
+
+        if raw_status == "FAILED" and not result["text"] and not result["error"]:
+            result["error"] = msg.get("error", {}).get("message") or f"Genie returned FAILED status. Raw: {str(msg.get('error', ''))}"
 
         return result
