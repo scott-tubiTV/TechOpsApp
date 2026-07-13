@@ -46,7 +46,7 @@ class GenieClient:
         while time.time() - start < timeout:
             msg = self.get_message(space_id, conversation_id, msg_id)
             status = msg.get("status", "")
-            if status in ("COMPLETED", "FAILED"):
+            if status in ("COMPLETED", "COMPLETED_WITH_ERROR", "ASKING_AI", "FAILED"):
                 msg["conversation_id"] = conversation_id
                 return msg
             time.sleep(2)
@@ -55,8 +55,10 @@ class GenieClient:
 
     def parse_response(self, msg: dict) -> dict:
         """Extract the useful parts from a Genie message response."""
+        raw_status = msg.get("status")
+        normalized_status = "COMPLETED" if raw_status in ("COMPLETED", "ASKING_AI", "COMPLETED_WITH_ERROR") else raw_status
         result = {
-            "status": msg.get("status"),
+            "status": normalized_status,
             "conversation_id": msg.get("conversation_id"),
             "text": None,
             "sql": None,
