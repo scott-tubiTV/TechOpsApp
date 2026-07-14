@@ -209,13 +209,22 @@ def main():
 
                         if att_id and msg_id:
                             try:
-                                qr = client.get_query_result(
-                                    space_id=space_id,
-                                    conversation_id=parsed["conversation_id"],
-                                    message_id=msg_id,
-                                    attachment_id=att_id,
-                                )
-                                stmt = qr.get("statement_response", {})
+                                # Retry up to 3 times — result may not be ready immediately
+                                qr = None
+                                for attempt in range(3):
+                                    qr = client.get_query_result(
+                                        space_id=space_id,
+                                        conversation_id=parsed["conversation_id"],
+                                        message_id=msg_id,
+                                        attachment_id=att_id,
+                                    )
+                                    stmt = qr.get("statement_response", {})
+                                    if stmt.get("status", {}).get("state") == "SUCCEEDED" or stmt.get("result"):
+                                        break
+                                    import time
+                                    time.sleep(2)
+
+                                stmt = qr.get("statement_response", {}) if qr else {}
                                 columns = [col["name"] for col in stmt.get("manifest", {}).get("schema", {}).get("columns", [])]
                                 rows = []
                                 for chunk in stmt.get("result", {}).get("data_typed_array", []):
@@ -226,7 +235,7 @@ def main():
                                         rows.append(chunk)
                                 if columns and rows:
                                     query_df = pd.DataFrame(rows, columns=columns)
-                                elif not columns and not rows:
+                                elif not columns and not rows and parsed.get("sql"):
                                     with st.expander("Debug: Raw query result"):
                                         st.json(qr)
                             except Exception as e:
