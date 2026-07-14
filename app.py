@@ -169,7 +169,7 @@ def main():
                                 qr = client.get_query_result(
                                     space_id=space_id,
                                     conversation_id=parsed["conversation_id"],
-                                    message_id=response.get("id", ""),
+                                    message_id=response.get("_message_id") or response.get("id", ""),
                                     attachment_id=parsed["_query_attachment_id"],
                                 )
                                 columns = [col["name"] for col in qr.get("statement_response", {}).get("manifest", {}).get("schema", {}).get("columns", [])]
@@ -182,8 +182,8 @@ def main():
                                         rows.append(chunk)
                                 if columns and rows:
                                     query_df = pd.DataFrame(rows, columns=columns)
-                            except Exception:
-                                pass
+                            except Exception as e:
+                                st.caption(f"⚠️ Could not fetch query results: {e}")
 
                         if answer:
                             st.markdown(answer)

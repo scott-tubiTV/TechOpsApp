@@ -50,24 +50,23 @@ class GenieClient:
             last_status = status
             if status in ("COMPLETED", "COMPLETED_WITH_ERROR", "FAILED"):
                 msg["conversation_id"] = conversation_id
+                msg["_message_id"] = msg_id
                 return msg
             if status == "ASKING_AI":
-                # ASKING_AI can be transitional or terminal — wait a bit more
-                # to see if it transitions to COMPLETED
                 time.sleep(3)
                 msg2 = self.get_message(space_id, conversation_id, msg_id)
                 status2 = msg2.get("status", "")
                 if status2 == "ASKING_AI":
-                    # Still ASKING_AI after extra wait — treat as terminal
                     msg2["conversation_id"] = conversation_id
+                    msg2["_message_id"] = msg_id
                     return msg2
                 elif status2 in ("COMPLETED", "COMPLETED_WITH_ERROR", "FAILED"):
                     msg2["conversation_id"] = conversation_id
+                    msg2["_message_id"] = msg_id
                     return msg2
-                # Otherwise keep polling
             time.sleep(2)
 
-        return {"status": "TIMEOUT", "conversation_id": conversation_id, "_last_status": last_status}
+        return {"status": "TIMEOUT", "conversation_id": conversation_id, "_message_id": msg_id, "_last_status": last_status}
 
     def get_query_result(self, space_id: str, conversation_id: str, message_id: str, attachment_id: str) -> dict:
         return self._do(
