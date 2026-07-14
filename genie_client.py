@@ -74,6 +74,13 @@ class GenieClient:
             f"/api/2.0/genie/spaces/{space_id}/conversations/{conversation_id}/messages/{message_id}/query-result/{attachment_id}",
         )
 
+    def submit_feedback(self, space_id: str, conversation_id: str, message_id: str, rating: str) -> dict:
+        return self._do(
+            "POST",
+            f"/api/2.0/genie/spaces/{space_id}/conversations/{conversation_id}/messages/{message_id}/feedback",
+            body={"rating": rating},
+        )
+
     def parse_response(self, msg: dict) -> dict:
         """Extract the useful parts from a Genie message response."""
         raw_status = msg.get("status")

@@ -131,7 +131,7 @@ def main():
     else:
         st.header(f"💬 {st.session_state.active_space}")
 
-    for msg in st.session_state.messages:
+    for i, msg in enumerate(st.session_state.messages):
         with st.chat_message(msg["role"], avatar="🔮" if msg["role"] == "assistant" else None):
             st.markdown(msg["content"])
             if msg.get("routed_to"):
@@ -143,6 +143,33 @@ def main():
                 st.caption("**Suggested questions:**")
                 for q in msg["suggestions"]:
                     st.caption(f"• {q}")
+            if msg.get("_message_id") and msg["role"] == "assistant":
+                feedback_key = f"feedback_{i}"
+                if feedback_key not in st.session_state:
+                    col1, col2, col3 = st.columns([1, 1, 20])
+                    with col1:
+                        if st.button("👍", key=f"up_{i}", help="Helpful"):
+                            client = get_genie_client()
+                            space_id = GENIE_SPACES[msg.get("_space", st.session_state.active_space)]["id"]
+                            try:
+                                client.submit_feedback(space_id, msg["_conversation_id"], msg["_message_id"], "POSITIVE")
+                                st.session_state[feedback_key] = "positive"
+                                st.rerun()
+                            except Exception:
+                                pass
+                    with col2:
+                        if st.button("👎", key=f"down_{i}", help="Not helpful"):
+                            client = get_genie_client()
+                            space_id = GENIE_SPACES[msg.get("_space", st.session_state.active_space)]["id"]
+                            try:
+                                client.submit_feedback(space_id, msg["_conversation_id"], msg["_message_id"], "NEGATIVE")
+                                st.session_state[feedback_key] = "negative"
+                                st.rerun()
+                            except Exception:
+                                pass
+                else:
+                    feedback = st.session_state[feedback_key]
+                    st.caption(f"{'👍' if feedback == 'positive' else '👎'} Feedback submitted")
 
     if prompt := st.chat_input("Ask a question about content data..."):
         st.session_state.messages.append({"role": "user", "content": prompt})
@@ -216,7 +243,13 @@ def main():
                             st.info("Query ran but no results were returned.")
 
                         display_text = answer or ("Query returned results" if query_df is not None else "No results")
-                        assistant_msg = {"role": "assistant", "content": display_text}
+                        assistant_msg = {
+                            "role": "assistant",
+                            "content": display_text,
+                            "_message_id": msg_id,
+                            "_conversation_id": parsed["conversation_id"],
+                            "_space": routed_space,
+                        }
 
                         if st.session_state.auto_route:
                             st.caption(f"🔀 Routed to: **{routed_space}**")
