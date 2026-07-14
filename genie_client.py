@@ -99,11 +99,15 @@ class GenieClient:
                 result["query_description"] = query_info.get("description")
                 if query_info.get("error"):
                     result["error"] = query_info["error"]
-                # Store attachment ID for fetching query results
-                if attachment.get("id"):
-                    result["_query_attachment_id"] = attachment["id"]
+                # Store attachment ID — could be at attachment level or in query
+                att_id = attachment.get("id") or query_info.get("id")
+                if att_id:
+                    result["_query_attachment_id"] = att_id
             if "suggested_questions" in attachment:
                 result["suggested_questions"] = attachment["suggested_questions"].get("questions", [])
+
+        # Store raw attachments for debugging
+        result["_raw_attachments"] = msg.get("attachments", [])
 
         if raw_status == "FAILED" and not result["text"] and not result["error"]:
             result["error"] = msg.get("error", {}).get("message") or f"Genie returned FAILED status. Raw: {str(msg.get('error', ''))}"

@@ -177,33 +177,43 @@ def main():
 
                         # Fetch query results if available
                         query_df = None
-                        if parsed.get("_query_attachment_id"):
+                        msg_id = response.get("_message_id") or response.get("id", "")
+                        att_id = parsed.get("_query_attachment_id")
+
+                        if att_id and msg_id:
                             try:
                                 qr = client.get_query_result(
                                     space_id=space_id,
                                     conversation_id=parsed["conversation_id"],
-                                    message_id=response.get("_message_id") or response.get("id", ""),
-                                    attachment_id=parsed["_query_attachment_id"],
+                                    message_id=msg_id,
+                                    attachment_id=att_id,
                                 )
-                                columns = [col["name"] for col in qr.get("statement_response", {}).get("manifest", {}).get("schema", {}).get("columns", [])]
+                                stmt = qr.get("statement_response", {})
+                                columns = [col["name"] for col in stmt.get("manifest", {}).get("schema", {}).get("columns", [])]
                                 rows = []
-                                for chunk in qr.get("statement_response", {}).get("result", {}).get("data_typed_array", []):
+                                for chunk in stmt.get("result", {}).get("data_typed_array", []):
                                     row = [v.get("str", v.get("value", "")) for v in chunk.get("values", [])]
                                     rows.append(row)
                                 if not rows:
-                                    for chunk in qr.get("statement_response", {}).get("result", {}).get("data_array", []):
+                                    for chunk in stmt.get("result", {}).get("data_array", []):
                                         rows.append(chunk)
                                 if columns and rows:
                                     query_df = pd.DataFrame(rows, columns=columns)
+                                elif not columns and not rows:
+                                    with st.expander("Debug: Raw query result"):
+                                        st.json(qr)
                             except Exception as e:
-                                st.caption(f"⚠️ Could not fetch query results: {e}")
+                                st.warning(f"Could not fetch query results: {e}")
+                        elif parsed.get("sql") and not att_id:
+                            with st.expander("Debug: No attachment ID found"):
+                                st.json(parsed.get("_raw_attachments", []))
 
                         if answer:
                             st.markdown(answer)
                         if query_df is not None:
                             st.dataframe(query_df, use_container_width=True)
-                        elif not answer:
-                            st.info("Query completed but no results were returned.")
+                        elif parsed.get("sql") and not answer:
+                            st.info("Query ran but no results were returned.")
 
                         display_text = answer or ("Query returned results" if query_df is not None else "No results")
                         assistant_msg = {"role": "assistant", "content": display_text}
