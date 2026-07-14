@@ -132,7 +132,7 @@ def main():
         st.header(f"💬 {st.session_state.active_space}")
 
     for msg in st.session_state.messages:
-        with st.chat_message(msg["role"]):
+        with st.chat_message(msg["role"], avatar="🔮" if msg["role"] == "assistant" else None):
             st.markdown(msg["content"])
             if msg.get("routed_to"):
                 st.caption(f"🔀 Routed to: **{msg['routed_to']}**")
@@ -157,7 +157,7 @@ def main():
         else:
             routed_space = st.session_state.active_space
 
-        with st.chat_message("assistant"):
+        with st.chat_message("assistant", avatar="🔮"):
             with st.spinner(f"Querying {routed_space}..."):
                 client = get_genie_client()
                 space_id = GENIE_SPACES[routed_space]["id"]
