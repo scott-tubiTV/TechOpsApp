@@ -44,6 +44,7 @@ class GenieClient:
 
         start = time.time()
         last_status = None
+        asking_ai_count = 0
         while time.time() - start < timeout:
             msg = self.get_message(space_id, conversation_id, msg_id)
             status = msg.get("status", "")
@@ -53,18 +54,17 @@ class GenieClient:
                 msg["_message_id"] = msg_id
                 return msg
             if status == "ASKING_AI":
-                time.sleep(3)
-                msg2 = self.get_message(space_id, conversation_id, msg_id)
-                status2 = msg2.get("status", "")
-                if status2 == "ASKING_AI":
-                    msg2["conversation_id"] = conversation_id
-                    msg2["_message_id"] = msg_id
-                    return msg2
-                elif status2 in ("COMPLETED", "COMPLETED_WITH_ERROR", "FAILED"):
-                    msg2["conversation_id"] = conversation_id
-                    msg2["_message_id"] = msg_id
-                    return msg2
-            time.sleep(2)
+                asking_ai_count += 1
+                # ASKING_AI is often transitional while query results are being
+                # summarized. Only treat as terminal after 30s of continuous ASKING_AI
+                # with no query still running.
+                if asking_ai_count > 10:
+                    msg["conversation_id"] = conversation_id
+                    msg["_message_id"] = msg_id
+                    return msg
+            else:
+                asking_ai_count = 0
+            time.sleep(3)
 
         return {"status": "TIMEOUT", "conversation_id": conversation_id, "_message_id": msg_id, "_last_status": last_status}
 
