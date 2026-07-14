@@ -209,7 +209,7 @@ def main():
 
                         if att_id and msg_id:
                             try:
-                                # Retry up to 3 times — result may not be ready immediately
+                                import time as _time
                                 qr = None
                                 for attempt in range(3):
                                     qr = client.get_query_result(
@@ -219,25 +219,42 @@ def main():
                                         attachment_id=att_id,
                                     )
                                     stmt = qr.get("statement_response", {})
-                                    if stmt.get("status", {}).get("state") == "SUCCEEDED" or stmt.get("result"):
+                                    if stmt.get("status", {}).get("state") == "SUCCEEDED" or stmt.get("result") or stmt.get("manifest"):
                                         break
-                                    import time
-                                    time.sleep(2)
+                                    _time.sleep(2)
 
                                 stmt = qr.get("statement_response", {}) if qr else {}
                                 columns = [col["name"] for col in stmt.get("manifest", {}).get("schema", {}).get("columns", [])]
                                 rows = []
+                                # Try data_typed_array first
                                 for chunk in stmt.get("result", {}).get("data_typed_array", []):
                                     row = [v.get("str", v.get("value", "")) for v in chunk.get("values", [])]
                                     rows.append(row)
+                                # Fall back to data_array
                                 if not rows:
                                     for chunk in stmt.get("result", {}).get("data_array", []):
                                         rows.append(chunk)
+                                # Also check top-level keys (some APIs nest differently)
+                                if not rows and not columns:
+                                    columns = [col["name"] for col in qr.get("manifest", {}).get("schema", {}).get("columns", [])]
+                                    for chunk in qr.get("result", {}).get("data_typed_array", []):
+                                        row = [v.get("str", v.get("value", "")) for v in chunk.get("values", [])]
+                                        rows.append(row)
+                                    if not rows:
+                                        for chunk in qr.get("result", {}).get("data_array", []):
+                                            rows.append(chunk)
                                 if columns and rows:
                                     query_df = pd.DataFrame(rows, columns=columns)
-                                elif not columns and not rows and parsed.get("sql"):
-                                    with st.expander("Debug: Raw query result"):
-                                        st.json(qr)
+                                elif parsed.get("sql"):
+                                    with st.expander("Debug: Query result structure"):
+                                        st.json({
+                                            "top_keys": list(qr.keys()) if qr else [],
+                                            "stmt_keys": list(stmt.keys()) if stmt else [],
+                                            "result_keys": list(stmt.get("result", {}).keys()) if stmt.get("result") else [],
+                                            "status": stmt.get("status"),
+                                            "row_count": stmt.get("manifest", {}).get("total_row_count") or qr.get("manifest", {}).get("total_row_count"),
+                                            "truncated": stmt.get("result", {}).get("truncated") or qr.get("result", {}).get("truncated"),
+                                        })
                             except Exception as e:
                                 st.warning(f"Could not fetch query results: {e}")
                         elif parsed.get("sql") and not att_id:
