@@ -69,6 +69,12 @@ class GenieClient:
 
         return {"status": "TIMEOUT", "conversation_id": conversation_id, "_last_status": last_status}
 
+    def get_query_result(self, space_id: str, conversation_id: str, message_id: str, attachment_id: str) -> dict:
+        return self._do(
+            "GET",
+            f"/api/2.0/genie/spaces/{space_id}/conversations/{conversation_id}/messages/{message_id}/query-result/{attachment_id}",
+        )
+
     def parse_response(self, msg: dict) -> dict:
         """Extract the useful parts from a Genie message response."""
         raw_status = msg.get("status")
@@ -79,6 +85,8 @@ class GenieClient:
             "conversation_id": msg.get("conversation_id"),
             "text": None,
             "sql": None,
+            "query_result": None,
+            "query_description": None,
             "error": None,
             "suggested_questions": [],
         }
@@ -89,8 +97,12 @@ class GenieClient:
             if "query" in attachment:
                 query_info = attachment["query"]
                 result["sql"] = query_info.get("query")
+                result["query_description"] = query_info.get("description")
                 if query_info.get("error"):
                     result["error"] = query_info["error"]
+                # Store attachment ID for fetching query results
+                if attachment.get("id"):
+                    result["_query_attachment_id"] = attachment["id"]
             if "suggested_questions" in attachment:
                 result["suggested_questions"] = attachment["suggested_questions"].get("questions", [])
 

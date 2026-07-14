@@ -1,6 +1,7 @@
 """Content Ops Genie — Chat interface for content org data queries."""
 
 import os
+import pandas as pd
 import streamlit as st
 from genie_client import GenieClient
 
@@ -159,10 +160,40 @@ def main():
                     st.session_state.conversation_id = parsed["conversation_id"]
 
                     if parsed["status"] == "COMPLETED":
-                        answer = parsed["text"] or "Query completed but no text response was returned."
-                        st.markdown(answer)
+                        answer = parsed["text"] or parsed.get("query_description") or ""
 
-                        assistant_msg = {"role": "assistant", "content": answer}
+                        # Fetch query results if available
+                        query_df = None
+                        if parsed.get("_query_attachment_id"):
+                            try:
+                                qr = client.get_query_result(
+                                    space_id=space_id,
+                                    conversation_id=parsed["conversation_id"],
+                                    message_id=response.get("id", ""),
+                                    attachment_id=parsed["_query_attachment_id"],
+                                )
+                                columns = [col["name"] for col in qr.get("statement_response", {}).get("manifest", {}).get("schema", {}).get("columns", [])]
+                                rows = []
+                                for chunk in qr.get("statement_response", {}).get("result", {}).get("data_typed_array", []):
+                                    row = [v.get("str", v.get("value", "")) for v in chunk.get("values", [])]
+                                    rows.append(row)
+                                if not rows:
+                                    for chunk in qr.get("statement_response", {}).get("result", {}).get("data_array", []):
+                                        rows.append(chunk)
+                                if columns and rows:
+                                    query_df = pd.DataFrame(rows, columns=columns)
+                            except Exception:
+                                pass
+
+                        if answer:
+                            st.markdown(answer)
+                        if query_df is not None:
+                            st.dataframe(query_df, use_container_width=True)
+                        elif not answer:
+                            st.info("Query completed but no results were returned.")
+
+                        display_text = answer or ("Query returned results" if query_df is not None else "No results")
+                        assistant_msg = {"role": "assistant", "content": display_text}
 
                         if st.session_state.auto_route:
                             st.caption(f"🔀 Routed to: **{routed_space}**")
