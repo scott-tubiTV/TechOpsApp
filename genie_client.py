@@ -99,8 +99,7 @@ class GenieClient:
                 result["query_description"] = query_info.get("description")
                 if query_info.get("error"):
                     result["error"] = query_info["error"]
-                # Store attachment ID — could be at attachment level or in query
-                att_id = attachment.get("id") or query_info.get("id")
+                att_id = attachment.get("attachment_id") or attachment.get("id")
                 if att_id:
                     result["_query_attachment_id"] = att_id
             if "suggested_questions" in attachment:
