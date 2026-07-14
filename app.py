@@ -19,10 +19,21 @@ GENIE_SPACES = {
 }
 
 st.set_page_config(
-    page_title="Content Ops Genie",
+    page_title="Content Ops Genie | Tubi",
     page_icon="🔮",
     layout="wide",
 )
+
+st.markdown("""
+<style>
+    .stApp header {background-color: #1A1A2E;}
+    [data-testid="stSidebar"] {background-color: #12121F;}
+    [data-testid="stChatMessage"] {border-radius: 8px; margin-bottom: 8px;}
+    .stChatInput > div {border-color: #FA382F !important;}
+    .stDataFrame {border-radius: 8px;}
+    div[data-testid="stExpander"] {border-color: #2D2D44;}
+</style>
+""", unsafe_allow_html=True)
 
 
 @st.cache_resource
@@ -77,7 +88,9 @@ def main():
     init_session_state()
 
     with st.sidebar:
-        st.title("Content Ops Genie")
+        st.markdown("## 🔮 Content Ops Genie")
+        st.caption("Powered by Tubi Data")
+        st.divider()
         user_email = get_user_email()
         st.caption(f"Logged in as: **{user_email}**")
 
