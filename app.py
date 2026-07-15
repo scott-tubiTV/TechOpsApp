@@ -6,10 +6,10 @@ import streamlit as st
 from genie_client import GenieClient
 
 GENIE_SPACES = {
-    "TechOps Tool": {
-        "id": os.environ.get("GENIE_SPACE_TECHOPS", "01f0f656e427147884da9fe5344da78f"),
-        "description": "Content pipeline queries: ABF status, avails, metadata, policies, redeliveries",
-        "keywords": ["abf", "avail", "content", "policy", "metadata", "redelivery", "delivery", "import", "series", "episode", "movie", "partner", "titan", "assessment"],
+    "Content Metrics": {
+        "id": os.environ.get("GENIE_SPACE_TECHOPS", "01f1808d550e12fb9bd0578798518174"),
+        "description": "Ops metrics: policy snapshots, avails status, imports, images, partners, QA/ABF, redeliveries, workload",
+        "keywords": ["policy", "avail", "import", "image", "partner", "qa", "abf", "redelivery", "workload", "snapshot", "metric", "weekly", "monthly"],
     },
     "Dupe Checker V2": {
         "id": os.environ.get("GENIE_SPACE_DUPE_CHECKER", "01f122f4e2921b7a9c28ef03d0812ee6"),
