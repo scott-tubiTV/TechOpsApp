@@ -20,10 +20,16 @@ class GenieClient:
         )
 
     def get_message(self, space_id: str, conversation_id: str, message_id: str) -> dict:
-        return self._do(
-            "GET",
-            f"/api/2.0/genie/spaces/{space_id}/conversations/{conversation_id}/messages/{message_id}",
-        )
+        for attempt in range(3):
+            try:
+                return self._do(
+                    "GET",
+                    f"/api/2.0/genie/spaces/{space_id}/conversations/{conversation_id}/messages/{message_id}",
+                )
+            except Exception:
+                if attempt == 2:
+                    raise
+                time.sleep(2)
 
     def send_followup(self, space_id: str, conversation_id: str, message: str) -> dict:
         return self._do(
