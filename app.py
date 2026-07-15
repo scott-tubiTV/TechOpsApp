@@ -185,151 +185,124 @@ def main():
             routed_space = st.session_state.active_space
 
         with st.chat_message("assistant", avatar="🔮"):
-            status_container = st.status(f"Querying {routed_space}...", expanded=True)
-            with status_container:
-                client = get_genie_client()
-                space_id = GENIE_SPACES[routed_space]["id"]
-                status_text = st.empty()
+            progress = st.empty()
+            progress.caption("⏳ Sending question...")
+            client = get_genie_client()
+            space_id = GENIE_SPACES[routed_space]["id"]
 
-                def update_status(msg):
-                    status_text.caption(f"⏳ {msg}")
+            def update_status(msg):
+                progress.caption(f"⏳ {msg}")
 
-                try:
-                    response = client.ask(
-                        space_id=space_id,
-                        message=prompt,
-                        conversation_id=st.session_state.conversation_id,
-                        on_status=update_status,
-                    )
+            try:
+                response = client.ask(
+                    space_id=space_id,
+                    message=prompt,
+                    conversation_id=st.session_state.conversation_id,
+                    on_status=update_status,
+                )
 
-                    parsed = client.parse_response(response)
-                    st.session_state.conversation_id = parsed["conversation_id"]
-                    status_text.empty()
+                parsed = client.parse_response(response)
+                st.session_state.conversation_id = parsed["conversation_id"]
+                progress.empty()
 
-                    if parsed["status"] == "COMPLETED":
-                        status_container.update(label="Done", state="complete", expanded=False)
-                        answer = parsed["text"] or parsed.get("query_description") or ""
+                if parsed["status"] == "COMPLETED":
+                    answer = parsed["text"] or parsed.get("query_description") or ""
+                    query_df = None
+                    msg_id = response.get("_message_id") or response.get("id", "")
+                    att_id = parsed.get("_query_attachment_id")
 
-                        # Fetch query results if available
-                        query_df = None
-                        msg_id = response.get("_message_id") or response.get("id", "")
-                        att_id = parsed.get("_query_attachment_id")
+                    if att_id and msg_id:
+                        try:
+                            import time as _time
+                            update_status("Fetching results...")
+                            qr = None
+                            for attempt in range(3):
+                                qr = client.get_query_result(
+                                    space_id=space_id,
+                                    conversation_id=parsed["conversation_id"],
+                                    message_id=msg_id,
+                                    attachment_id=att_id,
+                                )
+                                stmt = qr.get("statement_response", {})
+                                if stmt.get("status", {}).get("state") == "SUCCEEDED" or stmt.get("result") or stmt.get("manifest"):
+                                    break
+                                _time.sleep(2)
+                            progress.empty()
 
-                        if att_id and msg_id:
-                            try:
-                                import time as _time
-                                qr = None
-                                for attempt in range(3):
-                                    qr = client.get_query_result(
-                                        space_id=space_id,
-                                        conversation_id=parsed["conversation_id"],
-                                        message_id=msg_id,
-                                        attachment_id=att_id,
-                                    )
-                                    stmt = qr.get("statement_response", {})
-                                    if stmt.get("status", {}).get("state") == "SUCCEEDED" or stmt.get("result") or stmt.get("manifest"):
-                                        break
-                                    _time.sleep(2)
+                            stmt = qr.get("statement_response", {}) if qr else {}
+                            columns = [col["name"] for col in stmt.get("manifest", {}).get("schema", {}).get("columns", [])]
+                            rows = []
+                            for chunk in stmt.get("result", {}).get("data_typed_array", []):
+                                row = [v.get("str", v.get("value", "")) for v in chunk.get("values", [])]
+                                rows.append(row)
+                            if not rows:
+                                for chunk in stmt.get("result", {}).get("data_array", []):
+                                    rows.append(chunk)
+                            if not rows and not columns:
+                                columns = [col["name"] for col in qr.get("manifest", {}).get("schema", {}).get("columns", [])]
+                                for chunk in qr.get("result", {}).get("data_array", []):
+                                    rows.append(chunk)
+                            if columns and rows:
+                                query_df = pd.DataFrame(rows, columns=columns)
+                        except Exception as e:
+                            progress.empty()
+                            st.warning(f"Could not fetch query results: {e}")
 
-                                stmt = qr.get("statement_response", {}) if qr else {}
-                                columns = [col["name"] for col in stmt.get("manifest", {}).get("schema", {}).get("columns", [])]
-                                rows = []
-                                # Try data_typed_array first
-                                for chunk in stmt.get("result", {}).get("data_typed_array", []):
-                                    row = [v.get("str", v.get("value", "")) for v in chunk.get("values", [])]
-                                    rows.append(row)
-                                # Fall back to data_array
-                                if not rows:
-                                    for chunk in stmt.get("result", {}).get("data_array", []):
-                                        rows.append(chunk)
-                                # Also check top-level keys (some APIs nest differently)
-                                if not rows and not columns:
-                                    columns = [col["name"] for col in qr.get("manifest", {}).get("schema", {}).get("columns", [])]
-                                    for chunk in qr.get("result", {}).get("data_typed_array", []):
-                                        row = [v.get("str", v.get("value", "")) for v in chunk.get("values", [])]
-                                        rows.append(row)
-                                    if not rows:
-                                        for chunk in qr.get("result", {}).get("data_array", []):
-                                            rows.append(chunk)
-                                if columns and rows:
-                                    query_df = pd.DataFrame(rows, columns=columns)
-                                elif parsed.get("sql"):
-                                    with st.expander("Debug: Query result structure"):
-                                        st.json({
-                                            "top_keys": list(qr.keys()) if qr else [],
-                                            "stmt_keys": list(stmt.keys()) if stmt else [],
-                                            "result_keys": list(stmt.get("result", {}).keys()) if stmt.get("result") else [],
-                                            "status": stmt.get("status"),
-                                            "row_count": stmt.get("manifest", {}).get("total_row_count") or qr.get("manifest", {}).get("total_row_count"),
-                                            "truncated": stmt.get("result", {}).get("truncated") or qr.get("result", {}).get("truncated"),
-                                        })
-                            except Exception as e:
-                                st.warning(f"Could not fetch query results: {e}")
-                        elif parsed.get("sql") and not att_id:
-                            with st.expander("Debug: No attachment ID found"):
-                                st.json(parsed.get("_raw_attachments", []))
+                    if answer:
+                        st.markdown(answer)
+                    if query_df is not None:
+                        st.dataframe(query_df, use_container_width=True)
+                    elif parsed.get("sql") and not answer:
+                        st.info("Query ran but no results were returned.")
 
-                        if answer:
-                            st.markdown(answer)
-                        if query_df is not None:
-                            st.dataframe(query_df, use_container_width=True)
-                        elif parsed.get("sql") and not answer:
-                            st.info("Query ran but no results were returned.")
+                    display_text = answer or ("Query returned results" if query_df is not None else "No results")
+                    assistant_msg = {
+                        "role": "assistant",
+                        "content": display_text,
+                        "_message_id": msg_id,
+                        "_conversation_id": parsed["conversation_id"],
+                        "_space": routed_space,
+                    }
 
-                        display_text = answer or ("Query returned results" if query_df is not None else "No results")
-                        assistant_msg = {
-                            "role": "assistant",
-                            "content": display_text,
-                            "_message_id": msg_id,
-                            "_conversation_id": parsed["conversation_id"],
-                            "_space": routed_space,
-                        }
+                    if st.session_state.auto_route:
+                        st.caption(f"🔀 Routed to: **{routed_space}**")
+                        assistant_msg["routed_to"] = routed_space
 
-                        if st.session_state.auto_route:
-                            st.caption(f"🔀 Routed to: **{routed_space}**")
-                            assistant_msg["routed_to"] = routed_space
+                    if parsed["sql"]:
+                        with st.expander("SQL Query"):
+                            st.code(parsed["sql"], language="sql")
+                        assistant_msg["sql"] = parsed["sql"]
 
-                        if parsed["sql"]:
-                            with st.expander("SQL Query"):
-                                st.code(parsed["sql"], language="sql")
-                            assistant_msg["sql"] = parsed["sql"]
+                    if parsed.get("error"):
+                        with st.expander("⚠️ Query Warning"):
+                            st.caption(parsed["error"])
 
-                        if parsed.get("error"):
-                            with st.expander("⚠️ Query Warning"):
-                                st.caption(parsed["error"])
+                    if parsed["suggested_questions"]:
+                        st.caption("**Suggested questions:**")
+                        for q in parsed["suggested_questions"]:
+                            st.caption(f"• {q}")
+                        assistant_msg["suggestions"] = parsed["suggested_questions"]
 
-                        if parsed["suggested_questions"]:
-                            st.caption("**Suggested questions:**")
-                            for q in parsed["suggested_questions"]:
-                                st.caption(f"• {q}")
-                            assistant_msg["suggestions"] = parsed["suggested_questions"]
-
-                    elif parsed["status"] == "FAILED":
-                        error_detail = parsed.get("error") or "No additional detail available."
-                        error_text = f"The query failed: {error_detail}"
-                        status_container.update(label="Query failed", state="error")
-                        st.error(error_text)
-                        if parsed.get("text"):
-                            st.info(parsed["text"])
-                        with st.expander("Debug Info"):
-                            st.caption(f"Raw status: `{parsed.get('raw_status')}`")
-                            st.caption(f"Conversation ID: `{parsed.get('conversation_id')}`")
-                        assistant_msg = {"role": "assistant", "content": error_text}
-
-                    else:
-                        last_seen = parsed.get("raw_status") or "unknown"
-                        timeout_text = f"⏱️ The query timed out after 3 minutes (last state: {last_seen}). The Genie may be overloaded — try again in a moment or rephrase your question."
-                        status_container.update(label="Timed out", state="error")
-                        st.warning(timeout_text)
-                        assistant_msg = {"role": "assistant", "content": timeout_text}
-
-                except Exception as e:
-                    error_text = f"Error communicating with Genie: {str(e)}"
-                    status_container.update(label="Error", state="error")
+                elif parsed["status"] == "FAILED":
+                    error_detail = parsed.get("error") or "No additional detail available."
+                    error_text = f"The query failed: {error_detail}"
                     st.error(error_text)
+                    if parsed.get("text"):
+                        st.info(parsed["text"])
                     assistant_msg = {"role": "assistant", "content": error_text}
 
-            status_container.update(state="complete", expanded=False)
+                else:
+                    last_seen = parsed.get("raw_status") or "unknown"
+                    timeout_text = f"⏱️ The query timed out after 3 minutes (last state: {last_seen}). The Genie may be overloaded — try again in a moment or rephrase your question."
+                    st.warning(timeout_text)
+                    assistant_msg = {"role": "assistant", "content": timeout_text}
+
+            except Exception as e:
+                progress.empty()
+                error_text = f"Error communicating with Genie: {str(e)}"
+                st.error(error_text)
+                assistant_msg = {"role": "assistant", "content": error_text}
+
             st.session_state.messages.append(assistant_msg)
 
 
