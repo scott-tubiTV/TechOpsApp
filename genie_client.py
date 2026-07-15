@@ -32,8 +32,11 @@ class GenieClient:
             body={"content": message},
         )
 
-    def ask(self, space_id: str, message: str, conversation_id: str = None, timeout: int = 120) -> dict:
+    def ask(self, space_id: str, message: str, conversation_id: str = None, timeout: int = 180, on_status=None) -> dict:
         """Send a message and poll until completion. Returns the full message response."""
+        if on_status:
+            on_status("Sending question...")
+
         if conversation_id:
             result = self.send_followup(space_id, conversation_id, message)
             msg_id = result.get("message_id") or result.get("id")
@@ -42,22 +45,33 @@ class GenieClient:
             conversation_id = result["conversation_id"]
             msg_id = result["message_id"]
 
+        if on_status:
+            on_status("Waiting for Genie...")
+
         start = time.time()
         last_status = None
         asking_ai_count = 0
         while time.time() - start < timeout:
             msg = self.get_message(space_id, conversation_id, msg_id)
             status = msg.get("status", "")
+            elapsed = int(time.time() - start)
+
+            if status != last_status and on_status:
+                status_labels = {
+                    "SUBMITTED": "Understanding your question...",
+                    "EXECUTING_QUERY": "Running SQL query...",
+                    "ASKING_AI": "Summarizing results...",
+                    "FILTERING_RESULTS": "Filtering results...",
+                }
+                on_status(status_labels.get(status, f"Processing ({status})..."))
             last_status = status
+
             if status in ("COMPLETED", "COMPLETED_WITH_ERROR", "FAILED"):
                 msg["conversation_id"] = conversation_id
                 msg["_message_id"] = msg_id
                 return msg
             if status == "ASKING_AI":
                 asking_ai_count += 1
-                # ASKING_AI is often transitional while query results are being
-                # summarized. Only treat as terminal after 30s of continuous ASKING_AI
-                # with no query still running.
                 if asking_ai_count > 10:
                     msg["conversation_id"] = conversation_id
                     msg["_message_id"] = msg_id

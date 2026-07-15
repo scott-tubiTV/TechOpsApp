@@ -185,21 +185,29 @@ def main():
             routed_space = st.session_state.active_space
 
         with st.chat_message("assistant", avatar="🔮"):
-            with st.spinner(f"Querying {routed_space}..."):
+            status_container = st.status(f"Querying {routed_space}...", expanded=True)
+            with status_container:
                 client = get_genie_client()
                 space_id = GENIE_SPACES[routed_space]["id"]
+                status_text = st.empty()
+
+                def update_status(msg):
+                    status_text.caption(f"⏳ {msg}")
 
                 try:
                     response = client.ask(
                         space_id=space_id,
                         message=prompt,
                         conversation_id=st.session_state.conversation_id,
+                        on_status=update_status,
                     )
 
                     parsed = client.parse_response(response)
                     st.session_state.conversation_id = parsed["conversation_id"]
+                    status_text.empty()
 
                     if parsed["status"] == "COMPLETED":
+                        status_container.update(label="Done", state="complete", expanded=False)
                         answer = parsed["text"] or parsed.get("query_description") or ""
 
                         # Fetch query results if available
@@ -299,6 +307,7 @@ def main():
                     elif parsed["status"] == "FAILED":
                         error_detail = parsed.get("error") or "No additional detail available."
                         error_text = f"The query failed: {error_detail}"
+                        status_container.update(label="Query failed", state="error")
                         st.error(error_text)
                         if parsed.get("text"):
                             st.info(parsed["text"])
@@ -308,18 +317,20 @@ def main():
                         assistant_msg = {"role": "assistant", "content": error_text}
 
                     else:
-                        timeout_text = "The query timed out. Try a simpler question or try again."
+                        last_seen = parsed.get("raw_status") or "unknown"
+                        timeout_text = f"⏱️ The query timed out after 3 minutes (last state: {last_seen}). The Genie may be overloaded — try again in a moment or rephrase your question."
+                        status_container.update(label="Timed out", state="error")
                         st.warning(timeout_text)
-                        with st.expander("Debug Info"):
-                            st.caption(f"Raw status: `{parsed.get('raw_status')}`")
                         assistant_msg = {"role": "assistant", "content": timeout_text}
 
                 except Exception as e:
                     error_text = f"Error communicating with Genie: {str(e)}"
+                    status_container.update(label="Error", state="error")
                     st.error(error_text)
                     assistant_msg = {"role": "assistant", "content": error_text}
 
-                st.session_state.messages.append(assistant_msg)
+            status_container.update(state="complete", expanded=False)
+            st.session_state.messages.append(assistant_msg)
 
 
 if __name__ == "__main__":
