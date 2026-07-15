@@ -1,4 +1,4 @@
-"""Content Ops Genie — Chat interface for content org data queries."""
+"""Argo — TechOps content metrics chat interface powered by Databricks Genie."""
 
 import os
 import pandas as pd
@@ -19,7 +19,7 @@ GENIE_SPACES = {
 }
 
 st.set_page_config(
-    page_title="Content Ops Genie | TechOps",
+    page_title="Argo | TechOps",
     page_icon="🔮",
     layout="wide",
 )
@@ -111,8 +111,8 @@ def main():
         st.markdown("""
         <div style="text-align:center; padding: 0.5rem 0 1rem;">
             <div style="display:inline-flex; align-items:center; justify-content:center; width:42px; height:42px; background:linear-gradient(135deg, #8b5cf6, #d4a843); border-radius:10px; font-weight:800; font-size:0.9rem; color:#fff; box-shadow: 0 0 20px rgba(139,92,246,0.3); margin-bottom:0.5rem;">TO</div>
-            <div style="font-size:1.3rem; font-weight:700; background:linear-gradient(135deg, #f0c75e, #d4a843); -webkit-background-clip:text; -webkit-text-fill-color:transparent;">Content Ops Genie</div>
-            <div style="font-size:0.7rem; color:#9b8bb8; letter-spacing:2px; text-transform:uppercase; margin-top:0.25rem;">Technical Operations</div>
+            <div style="font-size:1.3rem; font-weight:700; background:linear-gradient(135deg, #f0c75e, #d4a843); -webkit-background-clip:text; -webkit-text-fill-color:transparent;">Argo</div>
+            <div style="font-size:0.7rem; color:#9b8bb8; letter-spacing:2px; text-transform:uppercase; margin-top:0.25rem;">TechOps Content Metrics</div>
         </div>
         """, unsafe_allow_html=True)
         st.divider()
@@ -152,7 +152,7 @@ def main():
             st.caption(f"   {config['description']}")
 
     if st.session_state.auto_route:
-        st.header("💬 Content Ops Genie (Auto-routing)")
+        st.header("💬 Argo (Auto-routing)")
     else:
         st.header(f"💬 {st.session_state.active_space}")
 
