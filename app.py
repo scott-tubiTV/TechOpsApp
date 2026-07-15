@@ -170,6 +170,7 @@ def main():
                     st.caption(f"• {q}")
             if msg.get("_message_id") and msg["role"] == "assistant":
                 feedback_key = f"feedback_{i}"
+                feedback_reason_key = f"feedback_reason_{i}"
                 if feedback_key not in st.session_state:
                     col1, col2, col3 = st.columns([1, 1, 20])
                     with col1:
@@ -178,23 +179,55 @@ def main():
                             space_id = GENIE_SPACES[msg.get("_space", st.session_state.active_space)]["id"]
                             try:
                                 client.submit_feedback(space_id, msg["_conversation_id"], msg["_message_id"], "POSITIVE")
-                                st.session_state[feedback_key] = "positive"
-                                st.rerun()
                             except Exception:
                                 pass
+                            st.session_state[feedback_key] = "positive"
+                            st.rerun()
                     with col2:
                         if st.button("👎", key=f"down_{i}", help="Not helpful"):
+                            st.session_state[feedback_key] = "pending_reason"
+                            st.rerun()
+                elif st.session_state[feedback_key] == "pending_reason":
+                    st.caption("👎 What was wrong with this response?")
+                    reason = st.text_input(
+                        "Reason (optional)",
+                        key=f"reason_input_{i}",
+                        placeholder="e.g. Wrong numbers, used wrong table, too slow...",
+                        label_visibility="collapsed",
+                    )
+                    col1, col2, _ = st.columns([1, 1, 10])
+                    with col1:
+                        if st.button("Submit", key=f"submit_reason_{i}"):
                             client = get_genie_client()
                             space_id = GENIE_SPACES[msg.get("_space", st.session_state.active_space)]["id"]
                             try:
                                 client.submit_feedback(space_id, msg["_conversation_id"], msg["_message_id"], "NEGATIVE")
-                                st.session_state[feedback_key] = "negative"
-                                st.rerun()
                             except Exception:
                                 pass
+                            st.session_state[feedback_key] = "negative"
+                            st.session_state[feedback_reason_key] = reason or ""
+                            st.rerun()
+                    with col2:
+                        if st.button("Skip", key=f"skip_reason_{i}"):
+                            client = get_genie_client()
+                            space_id = GENIE_SPACES[msg.get("_space", st.session_state.active_space)]["id"]
+                            try:
+                                client.submit_feedback(space_id, msg["_conversation_id"], msg["_message_id"], "NEGATIVE")
+                            except Exception:
+                                pass
+                            st.session_state[feedback_key] = "negative"
+                            st.session_state[feedback_reason_key] = ""
+                            st.rerun()
                 else:
                     feedback = st.session_state[feedback_key]
-                    st.caption(f"{'👍' if feedback == 'positive' else '👎'} Feedback submitted")
+                    reason = st.session_state.get(feedback_reason_key, "")
+                    if feedback == "positive":
+                        st.caption("👍 Thanks for the feedback!")
+                    else:
+                        label = "👎 Feedback submitted"
+                        if reason:
+                            label += f" — *{reason}*"
+                        st.caption(label)
 
     if prompt := st.chat_input("Ask a question about content data..."):
         st.session_state.messages.append({"role": "user", "content": prompt})
