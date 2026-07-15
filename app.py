@@ -19,19 +19,39 @@ GENIE_SPACES = {
 }
 
 st.set_page_config(
-    page_title="Content Ops Genie | Tubi",
+    page_title="Content Ops Genie | TechOps",
     page_icon="🔮",
     layout="wide",
 )
 
 st.markdown("""
 <style>
-    .stApp header {background-color: #1A1A2E;}
-    [data-testid="stSidebar"] {background-color: #12121F;}
-    [data-testid="stChatMessage"] {border-radius: 8px; margin-bottom: 8px;}
-    .stChatInput > div {border-color: #FA382F !important;}
-    .stDataFrame {border-radius: 8px;}
-    div[data-testid="stExpander"] {border-color: #2D2D44;}
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+    .stApp header {background-color: #1a0a2e;}
+    [data-testid="stSidebar"] {
+        background: linear-gradient(180deg, #1a0a2e 0%, #2d1b4e 100%);
+        border-right: 1px solid rgba(139, 92, 246, 0.15);
+    }
+    [data-testid="stChatMessage"] {
+        border-radius: 12px;
+        margin-bottom: 10px;
+        border: 1px solid rgba(139, 92, 246, 0.1);
+    }
+    .stChatInput > div {border-color: rgba(139, 92, 246, 0.4) !important;}
+    .stChatInput > div:focus-within {border-color: #d4a843 !important; box-shadow: 0 0 12px rgba(212, 168, 67, 0.15);}
+    .stDataFrame {border-radius: 12px; border: 1px solid rgba(139, 92, 246, 0.15);}
+    div[data-testid="stExpander"] {border-color: rgba(139, 92, 246, 0.2);}
+    .stButton > button {
+        border: 1px solid rgba(139, 92, 246, 0.3);
+        border-radius: 8px;
+        transition: all 0.3s ease;
+    }
+    .stButton > button:hover {
+        border-color: #d4a843;
+        box-shadow: 0 0 15px rgba(212, 168, 67, 0.1);
+    }
+    .stSelectbox > div > div {border-color: rgba(139, 92, 246, 0.2) !important;}
+    h1, h2, h3 {font-family: 'Inter', sans-serif !important;}
 </style>
 """, unsafe_allow_html=True)
 
@@ -88,8 +108,13 @@ def main():
     init_session_state()
 
     with st.sidebar:
-        st.markdown("## 🔮 Content Ops Genie")
-        st.caption("Powered by Tubi Data")
+        st.markdown("""
+        <div style="text-align:center; padding: 0.5rem 0 1rem;">
+            <div style="display:inline-flex; align-items:center; justify-content:center; width:42px; height:42px; background:linear-gradient(135deg, #8b5cf6, #d4a843); border-radius:10px; font-weight:800; font-size:0.9rem; color:#fff; box-shadow: 0 0 20px rgba(139,92,246,0.3); margin-bottom:0.5rem;">TO</div>
+            <div style="font-size:1.3rem; font-weight:700; background:linear-gradient(135deg, #f0c75e, #d4a843); -webkit-background-clip:text; -webkit-text-fill-color:transparent;">Content Ops Genie</div>
+            <div style="font-size:0.7rem; color:#9b8bb8; letter-spacing:2px; text-transform:uppercase; margin-top:0.25rem;">Technical Operations</div>
+        </div>
+        """, unsafe_allow_html=True)
         st.divider()
         user_email = get_user_email()
         st.caption(f"Logged in as: **{user_email}**")
