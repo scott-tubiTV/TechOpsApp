@@ -407,15 +407,17 @@ def _render_chat(prompt=None, user_email=None):
                 for q in msg["suggestions"]:
                     st.caption(f"• {q}")
 
-            # Feedback (admin only)
-            if msg["role"] == "assistant" and is_admin(user_email):
+            # Feedback — all users get soft signal, admins also save benchmarks
+            if msg["role"] == "assistant":
+                admin = is_admin(user_email)
                 feedback_key = f"feedback_{i}"
                 feedback_reason_key = f"feedback_reason_{i}"
                 if feedback_key not in st.session_state:
                     st.markdown('<div style="margin-top:10px;"><span style="font-size:12.5px; color:#8a8199;">Was this helpful?</span></div>', unsafe_allow_html=True)
                     col1, col2, col3 = st.columns([1, 1, 20])
                     with col1:
-                        if st.button("👍", key=f"up_{i}", help="Helpful — saves as benchmark"):
+                        help_text = "Helpful — saves as benchmark" if admin else "Helpful"
+                        if st.button("👍", key=f"up_{i}", help=help_text):
                             client = get_genie_client()
                             space_id = GENIE_SPACES[msg.get("_space", st.session_state.active_space)]["id"]
                             if msg.get("_message_id") and msg.get("_conversation_id"):
@@ -423,7 +425,7 @@ def _render_chat(prompt=None, user_email=None):
                                     client.submit_feedback(space_id, msg["_conversation_id"], msg["_message_id"], "POSITIVE")
                                 except Exception:
                                     pass
-                            if msg.get("sql") and i > 0:
+                            if admin and msg.get("sql") and i > 0:
                                 user_question = st.session_state.messages[i - 1].get("content", "")
                                 if user_question:
                                     try:
@@ -434,7 +436,17 @@ def _render_chat(prompt=None, user_email=None):
                             st.rerun()
                     with col2:
                         if st.button("👎", key=f"down_{i}", help="Not helpful"):
-                            st.session_state[feedback_key] = "pending_reason"
+                            if admin:
+                                st.session_state[feedback_key] = "pending_reason"
+                            else:
+                                if msg.get("_message_id") and msg.get("_conversation_id"):
+                                    client = get_genie_client()
+                                    space_id = GENIE_SPACES[msg.get("_space", st.session_state.active_space)]["id"]
+                                    try:
+                                        client.submit_feedback(space_id, msg["_conversation_id"], msg["_message_id"], "NEGATIVE")
+                                    except Exception:
+                                        pass
+                                st.session_state[feedback_key] = "negative"
                             st.rerun()
                 elif st.session_state[feedback_key] == "pending_reason":
                     st.markdown("""
@@ -475,7 +487,7 @@ def _render_chat(prompt=None, user_email=None):
                     feedback = st.session_state[feedback_key]
                     reason = st.session_state.get(feedback_reason_key, "")
                     if feedback == "positive":
-                        has_sql = msg.get("sql") and i > 0
+                        has_sql = admin and msg.get("sql") and i > 0
                         label = "✓ Saved as benchmark" if has_sql else "✓ Thanks for the feedback"
                         st.markdown(f'<div style="font-size:12.5px; color:#0d9488; margin-top:8px;">{label}</div>', unsafe_allow_html=True)
                     else:
