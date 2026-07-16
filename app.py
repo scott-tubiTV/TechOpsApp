@@ -5,6 +5,10 @@ import pandas as pd
 import streamlit as st
 from genie_client import GenieClient
 
+ADMIN_EMAILS = [
+    "swhitney@tubi.tv",
+]
+
 GENIE_SPACES = {
     "Content Metrics": {
         "id": os.environ.get("GENIE_SPACE_TECHOPS", "01f1808d550e12fb9bd0578798518174"),
@@ -176,6 +180,10 @@ def get_user_email():
         return "unknown"
 
 
+def is_admin(email):
+    return email and email.lower() in [e.lower() for e in ADMIN_EMAILS]
+
+
 def get_user_display_name(email):
     if email and "@" in email:
         name = email.split("@")[0]
@@ -291,7 +299,7 @@ def main():
             <div style="width:34px; height:34px; border-radius:9px; background:linear-gradient(135deg,#7c3aed,#c026d3); display:flex; align-items:center; justify-content:center; font-weight:700; font-size:12px; color:#fff;">{user_initials}</div>
             <div style="line-height:1.3;">
                 <div style="font-size:13px; font-weight:600; color:#1b1626 !important;">{user_name}</div>
-                <div style="font-size:11px; color:#8a8199 !important;">{len(GENIE_SPACES)} spaces</div>
+                <div style="font-size:11px; color:#8a8199 !important;">{len(GENIE_SPACES)} spaces{'  · <span style=\"color:#7c3aed; font-weight:600;\">Admin</span>' if is_admin(user_email) else ''}</div>
             </div>
         </div>
         """, unsafe_allow_html=True)
@@ -306,7 +314,7 @@ def main():
     if not st.session_state.messages and not prompt:
         _render_welcome(user_name)
     else:
-        _render_chat(prompt)
+        _render_chat(prompt, user_email)
 
 
 def _render_welcome(user_name):
@@ -340,7 +348,7 @@ def _render_welcome(user_name):
                 st.rerun()
 
 
-def _render_chat(prompt=None):
+def _render_chat(prompt=None, user_email=None):
     """Render the chat conversation view."""
     # Status bar
     st.markdown(f"""
@@ -386,8 +394,8 @@ def _render_chat(prompt=None):
                 for q in msg["suggestions"]:
                     st.caption(f"• {q}")
 
-            # Feedback
-            if msg.get("_message_id") and msg["role"] == "assistant":
+            # Feedback (admin only)
+            if msg.get("_message_id") and msg["role"] == "assistant" and is_admin(user_email):
                 feedback_key = f"feedback_{i}"
                 feedback_reason_key = f"feedback_reason_{i}"
                 if feedback_key not in st.session_state:
