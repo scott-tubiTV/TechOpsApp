@@ -353,7 +353,7 @@ def _render_chat():
 
     # Render message history
     for i, msg in enumerate(st.session_state.messages):
-        with st.chat_message(msg["role"], avatar="✦" if msg["role"] == "assistant" else None):
+        with st.chat_message(msg["role"], avatar="🔮" if msg["role"] == "assistant" else None):
             # Routing badge for assistant messages
             if msg.get("routed_to") and msg["role"] == "assistant":
                 space_name = msg["routed_to"]
@@ -471,7 +471,7 @@ def _render_chat():
         else:
             routed_space = st.session_state.active_space
 
-        with st.chat_message("assistant", avatar="✦"):
+        with st.chat_message("assistant", avatar="🔮"):
             # Show routing badge
             color = GENIE_SPACES[routed_space].get("color", "#a855f7")
             st.markdown(f"""
