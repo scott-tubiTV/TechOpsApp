@@ -10,48 +10,151 @@ GENIE_SPACES = {
         "id": os.environ.get("GENIE_SPACE_TECHOPS", "01f1808d550e12fb9bd0578798518174"),
         "description": "Ops metrics: policy snapshots, avails status, imports, images, partners, QA/ABF, redeliveries, workload",
         "keywords": ["policy", "avail", "import", "image", "partner", "qa", "abf", "redelivery", "workload", "snapshot", "metric", "weekly", "monthly"],
+        "color": "#a855f7",
     },
     "Dupe Checker V2": {
         "id": os.environ.get("GENIE_SPACE_DUPE_CHECKER", "01f122f4e2921b7a9c28ef03d0812ee6"),
         "description": "Duplicate title detection: upload CSV avails to check for existing titles and conflicts",
         "keywords": ["dupe", "duplicate", "conflict", "csv", "upload", "check", "avails file", "overlap", "territory"],
+        "color": "#f472b6",
     },
 }
 
+SUGGESTION_CARDS = [
+    "Show ops workload breakdown this week",
+    "How many avails are pending review?",
+    "Partner summary by title count",
+    "Redelivery volume this week",
+]
+
 st.set_page_config(
     page_title="Argo | TechOps",
-    page_icon="🔮",
+    page_icon="✦",
     layout="wide",
 )
 
 st.markdown("""
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
-    .stApp header {background-color: #1a0a2e;}
+    @import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+    .stApp header {background-color: #faf9fc; border-bottom: 1px solid #eceaf2;}
     [data-testid="stSidebar"] {
-        background: linear-gradient(180deg, #1a0a2e 0%, #2d1b4e 100%);
-        border-right: 1px solid rgba(139, 92, 246, 0.15);
+        background: #f3f0f8;
+        border-right: 1px solid #e7e3ee;
     }
+    [data-testid="stSidebar"] * {color: #4b4458 !important;}
+    [data-testid="stSidebar"] .stMarkdown h1,
+    [data-testid="stSidebar"] .stMarkdown h2,
+    [data-testid="stSidebar"] .stMarkdown h3 {color: #1b1626 !important;}
+
     [data-testid="stChatMessage"] {
         border-radius: 12px;
         margin-bottom: 10px;
-        border: 1px solid rgba(139, 92, 246, 0.1);
+        background: #ffffff;
+        border: 1px solid #e7e3ee;
     }
-    .stChatInput > div {border-color: rgba(139, 92, 246, 0.4) !important;}
-    .stChatInput > div:focus-within {border-color: #d4a843 !important; box-shadow: 0 0 12px rgba(212, 168, 67, 0.15);}
-    .stDataFrame {border-radius: 12px; border: 1px solid rgba(139, 92, 246, 0.15);}
-    div[data-testid="stExpander"] {border-color: rgba(139, 92, 246, 0.2);}
+    .stChatInput > div {
+        border: 1px solid #ddd6ea !important;
+        border-radius: 14px !important;
+        background: #ffffff !important;
+        box-shadow: 0 8px 24px rgba(90,60,140,0.06);
+    }
+    .stChatInput > div:focus-within {
+        border-color: #7c3aed !important;
+        box-shadow: 0 8px 24px rgba(124,58,237,0.12) !important;
+    }
+    .stDataFrame {
+        border-radius: 12px;
+        border: 1px solid #e7e3ee;
+        box-shadow: 0 4px 16px rgba(90,60,140,0.04);
+    }
+    div[data-testid="stExpander"] {
+        border: 1px solid #e7e3ee;
+        border-radius: 12px;
+        background: #faf9fc;
+    }
     .stButton > button {
-        border: 1px solid rgba(139, 92, 246, 0.3);
-        border-radius: 8px;
-        transition: all 0.3s ease;
+        border: 1px solid #e2ddec;
+        border-radius: 10px;
+        font-weight: 600;
+        transition: all 0.2s ease;
     }
     .stButton > button:hover {
-        border-color: #d4a843;
-        box-shadow: 0 0 15px rgba(212, 168, 67, 0.1);
+        border-color: #7c3aed;
+        color: #7c3aed;
+        box-shadow: 0 4px 12px rgba(124,58,237,0.1);
     }
-    .stSelectbox > div > div {border-color: rgba(139, 92, 246, 0.2) !important;}
-    h1, h2, h3 {font-family: 'Inter', sans-serif !important;}
+    h1, h2, h3 {font-family: 'Space Grotesk', sans-serif !important; letter-spacing: -0.01em;}
+    p, span, div {font-family: 'Manrope', sans-serif;}
+    code, pre {font-family: 'JetBrains Mono', monospace !important;}
+
+    .suggestion-card {
+        border: 1px solid #e7e3ee;
+        background: #ffffff;
+        border-radius: 11px;
+        padding: 14px 16px;
+        font-size: 14px;
+        color: #3b3448;
+        cursor: pointer;
+        transition: all 0.2s ease;
+    }
+    .suggestion-card:hover {
+        border-color: #7c3aed;
+        box-shadow: 0 4px 16px rgba(124,58,237,0.08);
+    }
+    .routing-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        background: #f3ecfd;
+        border: 1px solid #e3d3fa;
+        color: #7c3aed;
+        font-size: 12px;
+        font-weight: 600;
+        padding: 4px 10px;
+        border-radius: 20px;
+        margin-bottom: 8px;
+    }
+    .routing-dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        display: inline-block;
+    }
+    .space-item {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 8px 12px;
+        border-radius: 9px;
+        font-size: 13px;
+        color: #3b3448;
+    }
+    .space-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        display: inline-block;
+        flex-shrink: 0;
+    }
+    .status-indicator {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 12px;
+        color: #8a8199;
+    }
+    .status-dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: #2dd4bf;
+        animation: pulse 2s infinite;
+    }
+    @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.4; }
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -62,7 +165,6 @@ def get_genie_client():
 
 
 def get_user_email():
-    """Get the authenticated user's email from Streamlit headers."""
     headers = st.context.headers
     email = headers.get("X-Forwarded-Email") or headers.get("X-Forwarded-Preferred-Username")
     if email:
@@ -74,14 +176,28 @@ def get_user_email():
         return "unknown"
 
 
+def get_user_display_name(email):
+    if email and "@" in email:
+        name = email.split("@")[0]
+        parts = name.replace(".", " ").replace("_", " ").split()
+        return " ".join(p.capitalize() for p in parts)
+    return "User"
+
+
+def get_user_initials(email):
+    name = get_user_display_name(email)
+    parts = name.split()
+    if len(parts) >= 2:
+        return (parts[0][0] + parts[1][0]).upper()
+    return name[:2].upper()
+
+
 def route_query(message: str) -> str:
-    """Rule-based router: pick the best Genie space for a given message."""
     msg_lower = message.lower()
     scores = {}
     for name, config in GENIE_SPACES.items():
         score = sum(1 for kw in config["keywords"] if kw in msg_lower)
         scores[name] = score
-
     best = max(scores, key=scores.get)
     if scores[best] > 0:
         return best
@@ -96,31 +212,63 @@ def init_session_state():
     if "active_space" not in st.session_state:
         st.session_state.active_space = list(GENIE_SPACES.keys())[0]
     if "auto_route" not in st.session_state:
-        st.session_state.auto_route = False
+        st.session_state.auto_route = True
+    if "view" not in st.session_state:
+        st.session_state.view = "welcome"
 
 
 def clear_conversation():
     st.session_state.messages = []
     st.session_state.conversation_id = None
+    st.session_state.view = "welcome"
+
+
+def send_suggestion(text):
+    st.session_state._pending_suggestion = text
+    st.session_state.view = "chat"
 
 
 def main():
     init_session_state()
+    user_email = get_user_email()
+    user_name = get_user_display_name(user_email)
+    user_initials = get_user_initials(user_email)
 
+    # Sidebar
     with st.sidebar:
-        st.markdown("""
-        <div style="text-align:center; padding: 0.5rem 0 1rem;">
-            <div style="display:inline-flex; align-items:center; justify-content:center; width:42px; height:42px; background:linear-gradient(135deg, #8b5cf6, #d4a843); border-radius:10px; font-weight:800; font-size:0.9rem; color:#fff; box-shadow: 0 0 20px rgba(139,92,246,0.3); margin-bottom:0.5rem;">TO</div>
-            <div style="font-size:1.3rem; font-weight:700; background:linear-gradient(135deg, #f0c75e, #d4a843); -webkit-background-clip:text; -webkit-text-fill-color:transparent;">Argo</div>
-            <div style="font-size:0.7rem; color:#9b8bb8; letter-spacing:2px; text-transform:uppercase; margin-top:0.25rem;">TechOps Content Metrics</div>
+        st.markdown(f"""
+        <div style="padding: 4px 0 12px; display:flex; align-items:center; gap:10px;">
+            <div style="width:26px; height:26px; border-radius:7px; background:linear-gradient(140deg, #8b3dff, #c026d3);"></div>
+            <div style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:17px; letter-spacing:-0.01em; color:#1b1626 !important;">Argo</div>
         </div>
         """, unsafe_allow_html=True)
-        st.divider()
-        user_email = get_user_email()
-        st.caption(f"Logged in as: **{user_email}**")
+
+        if st.button("+ New query", use_container_width=True, type="primary"):
+            clear_conversation()
+            st.rerun()
 
         st.divider()
 
+        # Genie spaces section
+        st.markdown("""
+        <div style="font-size:10.5px; font-weight:700; letter-spacing:0.13em; color:#9990a8; text-transform:uppercase; padding:0 0 8px;">
+            Genie spaces
+        </div>
+        """, unsafe_allow_html=True)
+
+        for name, config in GENIE_SPACES.items():
+            color = config.get("color", "#a855f7")
+            active = "font-weight:700;" if name == st.session_state.active_space else ""
+            st.markdown(f"""
+            <div class="space-item" style="{active}">
+                <span class="space-dot" style="background:{color};"></span>
+                {name}
+            </div>
+            """, unsafe_allow_html=True)
+
+        st.divider()
+
+        # Auto-route toggle
         st.session_state.auto_route = st.toggle(
             "Auto-route queries",
             value=st.session_state.auto_route,
@@ -132,46 +280,117 @@ def main():
                 "Genie Space",
                 list(GENIE_SPACES.keys()),
                 index=list(GENIE_SPACES.keys()).index(st.session_state.active_space),
+                label_visibility="collapsed",
             )
             if selected_space != st.session_state.active_space:
                 st.session_state.active_space = selected_space
                 clear_conversation()
                 st.rerun()
 
+        # Spacer + user profile at bottom
+        st.markdown("<div style='flex:1;'></div>", unsafe_allow_html=True)
         st.divider()
+        st.markdown(f"""
+        <div style="display:flex; align-items:center; gap:11px; padding:4px 0;">
+            <div style="width:34px; height:34px; border-radius:9px; background:linear-gradient(135deg,#7c3aed,#c026d3); display:flex; align-items:center; justify-content:center; font-weight:700; font-size:12px; color:#fff;">{user_initials}</div>
+            <div style="line-height:1.3;">
+                <div style="font-size:13px; font-weight:600; color:#1b1626 !important;">{user_name}</div>
+                <div style="font-size:11px; color:#8a8199 !important;">{len(GENIE_SPACES)} spaces</div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
 
-        if st.button("New Conversation", use_container_width=True):
-            clear_conversation()
-            st.rerun()
-
-        st.divider()
-        st.caption("**Available Spaces:**")
-        for name, config in GENIE_SPACES.items():
-            icon = "✅" if name == st.session_state.active_space else "○"
-            st.caption(f"{icon} **{name}**")
-            st.caption(f"   {config['description']}")
-
-    if st.session_state.auto_route:
-        st.header("💬 Argo (Auto-routing)")
+    # Main content area
+    if st.session_state.view == "welcome" and not st.session_state.messages:
+        _render_welcome(user_name)
     else:
-        st.header(f"💬 {st.session_state.active_space}")
+        st.session_state.view = "chat"
+        _render_chat()
 
+
+def _render_welcome(user_name):
+    """Render the welcome/landing screen with suggestions."""
+    st.markdown(f"""
+    <div style="padding: 60px 0 20px; text-align:left;">
+        <div style="font-family:'Space Grotesk',sans-serif; font-size:32px; font-weight:700; letter-spacing:-0.02em; color:#1b1626; margin-bottom:8px;">
+            Hello, {user_name}.
+        </div>
+        <div style="font-size:15px; color:#8a8199; margin-bottom:6px;">
+            Ask a question and Argo routes it to the right Genie space.
+        </div>
+        <div class="status-indicator" style="margin-top:8px;">
+            <span class="status-dot"></span>
+            {len(GENIE_SPACES)} Genie spaces connected
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    st.markdown("""
+    <div style="font-size:11px; font-weight:700; letter-spacing:0.13em; color:#a49bb3; text-transform:uppercase; margin:24px 0 12px;">
+        Try asking
+    </div>
+    """, unsafe_allow_html=True)
+
+    cols = st.columns(2)
+    for idx, suggestion in enumerate(SUGGESTION_CARDS):
+        with cols[idx % 2]:
+            if st.button(suggestion, key=f"suggest_{idx}", use_container_width=True):
+                send_suggestion(suggestion)
+                st.rerun()
+
+
+def _render_chat():
+    """Render the chat conversation view."""
+    # Status bar
+    st.markdown(f"""
+    <div style="display:flex; align-items:center; justify-content:flex-end; padding:0 0 12px; border-bottom:1px solid #eceaf2; margin-bottom:16px;">
+        <div class="status-indicator">
+            <span class="status-dot"></span>
+            Auto-routing {'on' if st.session_state.auto_route else 'off'}
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # Render message history
     for i, msg in enumerate(st.session_state.messages):
-        with st.chat_message(msg["role"], avatar="🔮" if msg["role"] == "assistant" else None):
+        with st.chat_message(msg["role"], avatar="✦" if msg["role"] == "assistant" else None):
+            # Routing badge for assistant messages
+            if msg.get("routed_to") and msg["role"] == "assistant":
+                space_name = msg["routed_to"]
+                color = GENIE_SPACES.get(space_name, {}).get("color", "#a855f7")
+                st.markdown(f"""
+                <div class="routing-badge">
+                    <span class="routing-dot" style="background:{color};"></span>
+                    Answered by {space_name} <span style="color:#a49bb3; font-weight:400;">· routed automatically</span>
+                </div>
+                """, unsafe_allow_html=True)
+
             st.markdown(msg["content"])
-            if msg.get("routed_to"):
-                st.caption(f"🔀 Routed to: **{msg['routed_to']}**")
+
+            if msg.get("dataframe") is not None:
+                df = pd.DataFrame(msg["dataframe"]["data"], columns=msg["dataframe"]["columns"])
+                col_table, col_download = st.columns([6, 1])
+                with col_table:
+                    st.dataframe(df, use_container_width=True, hide_index=True)
+                with col_download:
+                    csv = df.to_csv(index=False)
+                    st.download_button("Download CSV", csv, "query_result.csv", "text/csv", key=f"dl_{i}")
+
             if msg.get("sql"):
-                with st.expander("SQL Query"):
+                with st.expander("View generated SQL"):
                     st.code(msg["sql"], language="sql")
+
             if msg.get("suggestions"):
                 st.caption("**Suggested questions:**")
                 for q in msg["suggestions"]:
                     st.caption(f"• {q}")
+
+            # Feedback
             if msg.get("_message_id") and msg["role"] == "assistant":
                 feedback_key = f"feedback_{i}"
                 feedback_reason_key = f"feedback_reason_{i}"
                 if feedback_key not in st.session_state:
+                    st.markdown('<div style="margin-top:10px;"><span style="font-size:12.5px; color:#8a8199;">Was this helpful?</span></div>', unsafe_allow_html=True)
                     col1, col2, col3 = st.columns([1, 1, 20])
                     with col1:
                         if st.button("👍", key=f"up_{i}", help="Helpful"):
@@ -188,16 +407,18 @@ def main():
                             st.session_state[feedback_key] = "pending_reason"
                             st.rerun()
                 elif st.session_state[feedback_key] == "pending_reason":
-                    st.caption("👎 What was wrong with this response?")
+                    st.markdown("""
+                    <div style="margin-top:8px; font-size:12.5px; font-weight:600; color:#b3323f;">What was wrong with this response?</div>
+                    """, unsafe_allow_html=True)
                     reason = st.text_input(
-                        "Reason (optional)",
+                        "Reason",
                         key=f"reason_input_{i}",
-                        placeholder="e.g. Wrong numbers, used wrong table, too slow...",
+                        placeholder="e.g. wrong genie, numbers look off, missing a column...",
                         label_visibility="collapsed",
                     )
                     col1, col2, _ = st.columns([1, 1, 10])
                     with col1:
-                        if st.button("Submit", key=f"submit_reason_{i}"):
+                        if st.button("Send", key=f"submit_reason_{i}", type="primary"):
                             client = get_genie_client()
                             space_id = GENIE_SPACES[msg.get("_space", st.session_state.active_space)]["id"]
                             try:
@@ -222,17 +443,25 @@ def main():
                     feedback = st.session_state[feedback_key]
                     reason = st.session_state.get(feedback_reason_key, "")
                     if feedback == "positive":
-                        st.caption("👍 Thanks for the feedback!")
+                        st.markdown('<div style="font-size:12.5px; color:#0d9488; margin-top:8px;">✓ Thanks for the feedback.</div>', unsafe_allow_html=True)
                     else:
-                        label = "👎 Feedback submitted"
+                        label = "✓ Feedback sent"
                         if reason:
-                            label += f" — *{reason}*"
-                        st.caption(label)
+                            label += f" — {reason}"
+                        st.markdown(f'<div style="font-size:12.5px; color:#0d9488; margin-top:8px;">{label}</div>', unsafe_allow_html=True)
 
-    if prompt := st.chat_input("Ask a question about content data..."):
+    # Handle pending suggestion
+    pending = st.session_state.pop("_pending_suggestion", None)
+
+    # Chat input
+    prompt = pending or st.chat_input("Ask anything about your content data...")
+
+    if prompt:
         st.session_state.messages.append({"role": "user", "content": prompt})
-        with st.chat_message("user"):
-            st.markdown(prompt)
+
+        if not pending:
+            with st.chat_message("user"):
+                st.markdown(prompt)
 
         if st.session_state.auto_route:
             routed_space = route_query(prompt)
@@ -242,7 +471,16 @@ def main():
         else:
             routed_space = st.session_state.active_space
 
-        with st.chat_message("assistant", avatar="🔮"):
+        with st.chat_message("assistant", avatar="✦"):
+            # Show routing badge
+            color = GENIE_SPACES[routed_space].get("color", "#a855f7")
+            st.markdown(f"""
+            <div class="routing-badge">
+                <span class="routing-dot" style="background:{color};"></span>
+                Routing to {routed_space}...
+            </div>
+            """, unsafe_allow_html=True)
+
             progress = st.empty()
             progress.caption("⏳ Sending question...")
             client = get_genie_client()
@@ -266,6 +504,7 @@ def main():
                 if parsed["status"] == "COMPLETED":
                     answer = parsed["text"] or parsed.get("query_description") or ""
                     query_df = None
+                    df_data = None
                     msg_id = response.get("_message_id") or response.get("id", "")
                     att_id = parsed.get("_query_attachment_id")
 
@@ -302,6 +541,7 @@ def main():
                                     rows.append(chunk)
                             if columns and rows:
                                 query_df = pd.DataFrame(rows, columns=columns)
+                                df_data = {"columns": columns, "data": rows}
                         except Exception as e:
                             progress.empty()
                             st.warning(f"Could not fetch query results: {e}")
@@ -309,7 +549,12 @@ def main():
                     if answer:
                         st.markdown(answer)
                     if query_df is not None:
-                        st.dataframe(query_df, use_container_width=True)
+                        col_table, col_download = st.columns([6, 1])
+                        with col_table:
+                            st.dataframe(query_df, use_container_width=True, hide_index=True)
+                        with col_download:
+                            csv = query_df.to_csv(index=False)
+                            st.download_button("Download CSV", csv, "query_result.csv", "text/csv", key="dl_live")
                     elif parsed.get("sql") and not answer:
                         st.info("Query ran but no results were returned.")
 
@@ -320,19 +565,18 @@ def main():
                         "_message_id": msg_id,
                         "_conversation_id": parsed["conversation_id"],
                         "_space": routed_space,
+                        "routed_to": routed_space,
                     }
-
-                    if st.session_state.auto_route:
-                        st.caption(f"🔀 Routed to: **{routed_space}**")
-                        assistant_msg["routed_to"] = routed_space
+                    if df_data:
+                        assistant_msg["dataframe"] = df_data
 
                     if parsed["sql"]:
-                        with st.expander("SQL Query"):
+                        with st.expander("View generated SQL"):
                             st.code(parsed["sql"], language="sql")
                         assistant_msg["sql"] = parsed["sql"]
 
                     if parsed.get("error"):
-                        with st.expander("⚠️ Query Warning"):
+                        with st.expander("Query Warning"):
                             st.caption(parsed["error"])
 
                     if parsed["suggested_questions"]:
@@ -351,7 +595,7 @@ def main():
 
                 else:
                     last_seen = parsed.get("raw_status") or "unknown"
-                    timeout_text = f"⏱️ The query timed out after 3 minutes (last state: {last_seen}). The Genie may be overloaded — try again in a moment or rephrase your question."
+                    timeout_text = f"The query timed out after 3 minutes (last state: {last_seen}). Try again in a moment or rephrase your question."
                     st.warning(timeout_text)
                     assistant_msg = {"role": "assistant", "content": timeout_text}
 
@@ -362,6 +606,9 @@ def main():
                 assistant_msg = {"role": "assistant", "content": error_text}
 
             st.session_state.messages.append(assistant_msg)
+
+        if pending:
+            st.rerun()
 
 
 if __name__ == "__main__":
