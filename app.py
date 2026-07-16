@@ -294,12 +294,13 @@ def main():
         # Spacer + user profile at bottom
         st.markdown("<div style='flex:1;'></div>", unsafe_allow_html=True)
         st.divider()
+        admin_badge = '  · <span style="color:#7c3aed; font-weight:600;">Admin</span>' if is_admin(user_email) else ''
         st.markdown(f"""
         <div style="display:flex; align-items:center; gap:11px; padding:4px 0;">
             <div style="width:34px; height:34px; border-radius:9px; background:linear-gradient(135deg,#7c3aed,#c026d3); display:flex; align-items:center; justify-content:center; font-weight:700; font-size:12px; color:#fff;">{user_initials}</div>
             <div style="line-height:1.3;">
                 <div style="font-size:13px; font-weight:600; color:#1b1626 !important;">{user_name}</div>
-                <div style="font-size:11px; color:#8a8199 !important;">{len(GENIE_SPACES)} spaces{'  · <span style=\"color:#7c3aed; font-weight:600;\">Admin</span>' if is_admin(user_email) else ''}</div>
+                <div style="font-size:11px; color:#8a8199 !important;">{len(GENIE_SPACES)} spaces{admin_badge}</div>
             </div>
         </div>
         """, unsafe_allow_html=True)
