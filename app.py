@@ -173,9 +173,15 @@ def get_user_email():
     email = headers.get("X-Forwarded-Email") or headers.get("X-Forwarded-Preferred-Username")
     if email:
         return email
+    # Databricks Apps proxy uses these header variants
+    for h in ["x-forwarded-email", "x-forwarded-preferred-username", "X-Databricks-User-Email"]:
+        val = headers.get(h)
+        if val:
+            return val
     try:
         client = get_genie_client()
-        return client.w.current_user.me().user_name
+        me = client.w.current_user.me()
+        return me.user_name or me.display_name or "unknown"
     except Exception:
         return "unknown"
 
@@ -396,7 +402,7 @@ def _render_chat(prompt=None, user_email=None):
                     st.caption(f"• {q}")
 
             # Feedback (admin only)
-            if msg.get("_message_id") and msg["role"] == "assistant" and is_admin(user_email):
+            if msg["role"] == "assistant" and is_admin(user_email):
                 feedback_key = f"feedback_{i}"
                 feedback_reason_key = f"feedback_reason_{i}"
                 if feedback_key not in st.session_state:
@@ -404,12 +410,13 @@ def _render_chat(prompt=None, user_email=None):
                     col1, col2, col3 = st.columns([1, 1, 20])
                     with col1:
                         if st.button("👍", key=f"up_{i}", help="Helpful"):
-                            client = get_genie_client()
-                            space_id = GENIE_SPACES[msg.get("_space", st.session_state.active_space)]["id"]
-                            try:
-                                client.submit_feedback(space_id, msg["_conversation_id"], msg["_message_id"], "POSITIVE")
-                            except Exception:
-                                pass
+                            if msg.get("_message_id") and msg.get("_conversation_id"):
+                                client = get_genie_client()
+                                space_id = GENIE_SPACES[msg.get("_space", st.session_state.active_space)]["id"]
+                                try:
+                                    client.submit_feedback(space_id, msg["_conversation_id"], msg["_message_id"], "POSITIVE")
+                                except Exception:
+                                    pass
                             st.session_state[feedback_key] = "positive"
                             st.rerun()
                     with col2:
@@ -429,23 +436,25 @@ def _render_chat(prompt=None, user_email=None):
                     col1, col2, _ = st.columns([1, 1, 10])
                     with col1:
                         if st.button("Send", key=f"submit_reason_{i}", type="primary"):
-                            client = get_genie_client()
-                            space_id = GENIE_SPACES[msg.get("_space", st.session_state.active_space)]["id"]
-                            try:
-                                client.submit_feedback(space_id, msg["_conversation_id"], msg["_message_id"], "NEGATIVE")
-                            except Exception:
-                                pass
+                            if msg.get("_message_id") and msg.get("_conversation_id"):
+                                client = get_genie_client()
+                                space_id = GENIE_SPACES[msg.get("_space", st.session_state.active_space)]["id"]
+                                try:
+                                    client.submit_feedback(space_id, msg["_conversation_id"], msg["_message_id"], "NEGATIVE")
+                                except Exception:
+                                    pass
                             st.session_state[feedback_key] = "negative"
                             st.session_state[feedback_reason_key] = reason or ""
                             st.rerun()
                     with col2:
                         if st.button("Skip", key=f"skip_reason_{i}"):
-                            client = get_genie_client()
-                            space_id = GENIE_SPACES[msg.get("_space", st.session_state.active_space)]["id"]
-                            try:
-                                client.submit_feedback(space_id, msg["_conversation_id"], msg["_message_id"], "NEGATIVE")
-                            except Exception:
-                                pass
+                            if msg.get("_message_id") and msg.get("_conversation_id"):
+                                client = get_genie_client()
+                                space_id = GENIE_SPACES[msg.get("_space", st.session_state.active_space)]["id"]
+                                try:
+                                    client.submit_feedback(space_id, msg["_conversation_id"], msg["_message_id"], "NEGATIVE")
+                                except Exception:
+                                    pass
                             st.session_state[feedback_key] = "negative"
                             st.session_state[feedback_reason_key] = ""
                             st.rerun()
@@ -508,7 +517,7 @@ def _render_chat(prompt=None, user_email=None):
                     answer = parsed["text"] or parsed.get("query_description") or ""
                     query_df = None
                     df_data = None
-                    msg_id = response.get("_message_id") or response.get("id", "")
+                    msg_id = response.get("_message_id") or response.get("id") or ""
                     att_id = parsed.get("_query_attachment_id")
 
                     if att_id and msg_id:
