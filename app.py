@@ -213,19 +213,15 @@ def init_session_state():
         st.session_state.active_space = list(GENIE_SPACES.keys())[0]
     if "auto_route" not in st.session_state:
         st.session_state.auto_route = True
-    if "view" not in st.session_state:
-        st.session_state.view = "welcome"
 
 
 def clear_conversation():
     st.session_state.messages = []
     st.session_state.conversation_id = None
-    st.session_state.view = "welcome"
 
 
 def send_suggestion(text):
     st.session_state._pending_suggestion = text
-    st.session_state.view = "chat"
 
 
 def main():
@@ -300,12 +296,17 @@ def main():
         </div>
         """, unsafe_allow_html=True)
 
+    # Handle pending suggestion (from welcome cards)
+    pending = st.session_state.pop("_pending_suggestion", None)
+
+    # Chat input is always visible
+    prompt = pending or st.chat_input("Ask anything about your content data...")
+
     # Main content area
-    if st.session_state.view == "welcome" and not st.session_state.messages:
+    if not st.session_state.messages and not prompt:
         _render_welcome(user_name)
     else:
-        st.session_state.view = "chat"
-        _render_chat()
+        _render_chat(prompt)
 
 
 def _render_welcome(user_name):
@@ -339,7 +340,7 @@ def _render_welcome(user_name):
                 st.rerun()
 
 
-def _render_chat():
+def _render_chat(prompt=None):
     """Render the chat conversation view."""
     # Status bar
     st.markdown(f"""
@@ -450,18 +451,11 @@ def _render_chat():
                             label += f" — {reason}"
                         st.markdown(f'<div style="font-size:12.5px; color:#0d9488; margin-top:8px;">{label}</div>', unsafe_allow_html=True)
 
-    # Handle pending suggestion
-    pending = st.session_state.pop("_pending_suggestion", None)
-
-    # Chat input
-    prompt = pending or st.chat_input("Ask anything about your content data...")
-
     if prompt:
         st.session_state.messages.append({"role": "user", "content": prompt})
 
-        if not pending:
-            with st.chat_message("user"):
-                st.markdown(prompt)
+        with st.chat_message("user"):
+            st.markdown(prompt)
 
         if st.session_state.auto_route:
             routed_space = route_query(prompt)
@@ -606,9 +600,6 @@ def _render_chat():
                 assistant_msg = {"role": "assistant", "content": error_text}
 
             st.session_state.messages.append(assistant_msg)
-
-        if pending:
-            st.rerun()
 
 
 if __name__ == "__main__":
