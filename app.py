@@ -169,11 +169,17 @@ def get_genie_client():
 
 
 def get_user_email():
+    # Databricks Apps exposes logged-in user via st.experimental_user
+    try:
+        user_info = st.experimental_user
+        if user_info and user_info.get("email"):
+            return user_info["email"]
+    except Exception:
+        pass
     headers = st.context.headers
     email = headers.get("X-Forwarded-Email") or headers.get("X-Forwarded-Preferred-Username")
     if email:
         return email
-    # Databricks Apps proxy uses these header variants
     for h in ["x-forwarded-email", "x-forwarded-preferred-username", "X-Databricks-User-Email"]:
         val = headers.get(h)
         if val:
@@ -618,6 +624,7 @@ def _render_chat(prompt=None, user_email=None):
                 assistant_msg = {"role": "assistant", "content": error_text}
 
             st.session_state.messages.append(assistant_msg)
+            st.rerun()
 
 
 if __name__ == "__main__":
