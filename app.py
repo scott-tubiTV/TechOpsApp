@@ -415,14 +415,21 @@ def _render_chat(prompt=None, user_email=None):
                     st.markdown('<div style="margin-top:10px;"><span style="font-size:12.5px; color:#8a8199;">Was this helpful?</span></div>', unsafe_allow_html=True)
                     col1, col2, col3 = st.columns([1, 1, 20])
                     with col1:
-                        if st.button("👍", key=f"up_{i}", help="Helpful"):
+                        if st.button("👍", key=f"up_{i}", help="Helpful — saves as benchmark"):
+                            client = get_genie_client()
+                            space_id = GENIE_SPACES[msg.get("_space", st.session_state.active_space)]["id"]
                             if msg.get("_message_id") and msg.get("_conversation_id"):
-                                client = get_genie_client()
-                                space_id = GENIE_SPACES[msg.get("_space", st.session_state.active_space)]["id"]
                                 try:
                                     client.submit_feedback(space_id, msg["_conversation_id"], msg["_message_id"], "POSITIVE")
                                 except Exception:
                                     pass
+                            if msg.get("sql") and i > 0:
+                                user_question = st.session_state.messages[i - 1].get("content", "")
+                                if user_question:
+                                    try:
+                                        client.save_benchmark(space_id, user_question, msg["sql"])
+                                    except Exception:
+                                        pass
                             st.session_state[feedback_key] = "positive"
                             st.rerun()
                     with col2:
@@ -468,7 +475,9 @@ def _render_chat(prompt=None, user_email=None):
                     feedback = st.session_state[feedback_key]
                     reason = st.session_state.get(feedback_reason_key, "")
                     if feedback == "positive":
-                        st.markdown('<div style="font-size:12.5px; color:#0d9488; margin-top:8px;">✓ Thanks for the feedback.</div>', unsafe_allow_html=True)
+                        has_sql = msg.get("sql") and i > 0
+                        label = "✓ Saved as benchmark" if has_sql else "✓ Thanks for the feedback"
+                        st.markdown(f'<div style="font-size:12.5px; color:#0d9488; margin-top:8px;">{label}</div>', unsafe_allow_html=True)
                     else:
                         label = "✓ Feedback sent"
                         if reason:

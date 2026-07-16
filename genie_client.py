@@ -1,6 +1,7 @@
 """Genie API client for interacting with Databricks Genie spaces."""
 
 import time
+import uuid
 from databricks.sdk import WorkspaceClient
 
 
@@ -99,6 +100,43 @@ class GenieClient:
             "POST",
             f"/api/2.0/genie/spaces/{space_id}/conversations/{conversation_id}/messages/{message_id}/feedback",
             body={"rating": rating},
+        )
+
+    def get_space(self, space_id: str) -> dict:
+        return self._do("GET", f"/api/2.0/genie/spaces/{space_id}")
+
+    def save_benchmark(self, space_id: str, question: str, sql: str) -> dict:
+        """Save a question/SQL pair as an example_question_sql on the space.
+
+        If the question already exists, updates the SQL. Otherwise appends.
+        Returns the PATCH response.
+        """
+        space = self.get_space(space_id)
+        serialized = space.get("serialized_space", {})
+        examples = serialized.get("example_question_sqls", [])
+
+        question_lower = question.strip().lower()
+        found = False
+        for ex in examples:
+            if ex.get("question", "").strip().lower() == question_lower:
+                ex["sql"] = sql
+                found = True
+                break
+
+        if not found:
+            examples.append({
+                "id": uuid.uuid4().hex,
+                "question": question.strip(),
+                "sql": sql,
+            })
+
+        examples.sort(key=lambda x: x.get("id", ""))
+        serialized["example_question_sqls"] = examples
+
+        return self._do(
+            "PATCH",
+            f"/api/2.0/genie/spaces/{space_id}",
+            body={"serialized_space": serialized},
         )
 
     def parse_response(self, msg: dict) -> dict:
