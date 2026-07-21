@@ -184,18 +184,6 @@ def render_content_id_matcher():
     </div>
     """, unsafe_allow_html=True)
 
-    try:
-        db_rows = _query_content_info()
-        index = _build_index(db_rows)
-        st.markdown(f"""
-        <div style="font-size:12px; color:#444; background:#f3f0f8; border-radius:8px; padding:8px 14px; display:inline-block; margin:8px 0 16px;">
-            Live database: {len(db_rows):,} active titles (movies + series) · refreshes hourly
-        </div>
-        """, unsafe_allow_html=True)
-    except Exception as e:
-        st.error(f"Failed to load content database: {e}")
-        return
-
     col_input, col_upload = st.columns([3, 1])
     with col_input:
         input_text = st.text_area(
@@ -211,9 +199,15 @@ def render_content_id_matcher():
 
     if st.button("Match Titles", type="primary", key="matcher_btn"):
         if input_text and input_text.strip():
-            parsed = parse_input_lines(input_text)
-            results = [match_title(title, ttype, index) for title, ttype in parsed]
-            st.session_state.matcher_results = results
+            try:
+                with st.spinner("Loading content database..."):
+                    db_rows = _query_content_info()
+                    index = _build_index(db_rows)
+                parsed = parse_input_lines(input_text)
+                results = [match_title(title, ttype, index) for title, ttype in parsed]
+                st.session_state.matcher_results = results
+            except Exception as e:
+                st.error(f"Failed to load content database: {e}")
         else:
             st.warning("Paste or upload titles first.")
 
