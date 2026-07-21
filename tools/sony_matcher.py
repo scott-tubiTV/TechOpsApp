@@ -52,12 +52,13 @@ def _query_content_info():
           AND active = true
     """
 
-    # Try serverless first (no warehouse_id), fall back to listing warehouses
+    # Use the same warehouse as the Genie space
     result = w.api_client.do(
         "POST",
         "/api/2.0/sql/statements",
         body={
             "statement": query,
+            "warehouse_id": "a6b9541289d75c6e",
             "wait_timeout": "50s",
         },
     )
