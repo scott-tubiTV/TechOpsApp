@@ -53,7 +53,7 @@ def _query_content_info():
                   AND active = true
             """,
             "warehouse_id": "a3ea80e7317d51e7",
-            "wait_timeout": "60s",
+            "wait_timeout": "50s",
         },
     )
 
