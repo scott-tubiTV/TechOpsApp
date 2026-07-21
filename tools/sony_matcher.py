@@ -9,7 +9,8 @@ import pandas as pd
 import streamlit as st
 from databricks.sdk import WorkspaceClient
 
-CONTENT_TABLE = "core_prod.content.content_info"
+AVAIL_MOVIES = "core_prod.contentavails_cdc.avail_movies"
+AVAIL_SERIES = "core_prod.contentavails_cdc.avail_series"
 
 
 def _normalize(text: str) -> str:
@@ -69,34 +70,34 @@ def _execute_sql(query):
 
 @st.cache_data(ttl=3600)
 def _query_import_ids():
-    """Fetch all distinct import_ids from content_info."""
+    """Fetch all distinct import_ids from avails tables."""
     rows = _execute_sql(f"""
-        SELECT DISTINCT import_id
-        FROM {CONTENT_TABLE}
-        WHERE import_id IS NOT NULL AND import_id != ''
-          AND active = true
+        SELECT DISTINCT import_id FROM (
+            SELECT import_id FROM {AVAIL_MOVIES} WHERE import_id IS NOT NULL AND import_id != ''
+            UNION
+            SELECT import_id FROM {AVAIL_SERIES} WHERE import_id IS NOT NULL AND import_id != ''
+        )
         ORDER BY import_id
     """)
     return [r["import_id"] for r in rows]
 
 
 @st.cache_data(ttl=3600)
-def _query_content_info(import_id):
-    """Fetch titles for a specific import_id from content_info.
+def _query_avails(import_id):
+    """Fetch titles from avail_movies + avail_series for a specific import_id.
 
-    Cached for 1 hour. Filtered to the selected import_id.
+    Cached for 1 hour. Uses the original avails titles (pre-import rename).
     """
     return _execute_sql(f"""
-        SELECT DISTINCT
-            content_id,
-            COALESCE(title, content_name) AS title,
-            content_type,
-            import_id
-        FROM {CONTENT_TABLE}
-        WHERE content_type IN ('MOVIE', 'SERIES')
-          AND is_episode = false
-          AND active = true
-          AND import_id = '{import_id}'
+        SELECT DISTINCT content_id, title, 'MOVIE' AS content_type, import_id
+        FROM {AVAIL_MOVIES}
+        WHERE import_id = '{import_id}'
+          AND content_id IS NOT NULL
+        UNION ALL
+        SELECT DISTINCT content_id, title, 'SERIES' AS content_type, import_id
+        FROM {AVAIL_SERIES}
+        WHERE import_id = '{import_id}'
+          AND content_id IS NOT NULL
     """)
 
 
@@ -248,7 +249,7 @@ def render_content_id_matcher():
         if input_text and input_text.strip():
             try:
                 with st.spinner(f"Loading titles for {selected_import_id}..."):
-                    db_rows = _query_content_info(selected_import_id)
+                    db_rows = _query_avails(selected_import_id)
                     index = _build_index(db_rows)
                 parsed = parse_input_lines(input_text)
                 results = [match_title(title, ttype, index) for title, ttype in parsed]
