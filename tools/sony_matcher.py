@@ -1,14 +1,15 @@
-"""Sony Content ID Matcher — looks up Sony content IDs by title."""
+"""Content ID Matcher — looks up Tubi content IDs by title from the live database."""
 
-import json
-import os
+import csv
+import io
 import re
 import unicodedata
 
 import pandas as pd
 import streamlit as st
+from databricks.sdk import WorkspaceClient
 
-CATALOG_PATH = os.path.join(os.path.dirname(__file__), "sony_catalog.json")
+CONTENT_TABLE = "core_prod.content.content_info"
 
 
 def _normalize(text: str) -> str:
@@ -23,108 +24,126 @@ def _strip_year(text: str) -> str:
     return re.sub(r"\s*\(\d{4}\)\s*$", "", text).strip()
 
 
-@st.cache_data
-def load_catalog():
-    with open(CATALOG_PATH) as f:
-        rows = json.load(f)
-    return rows
+@st.cache_resource
+def _get_workspace_client():
+    return WorkspaceClient()
 
 
-def build_index(catalog_rows, additions=None):
-    """Build a lookup index from catalog rows + user additions.
+@st.cache_data(ttl=3600)
+def _query_content_info():
+    """Fetch title/content_id/content_type/import_id from content_info.
 
-    Returns dict: normalized_title -> list of {title, type, contentId, source}
+    Cached for 1 hour to avoid hammering the warehouse on every match.
+    Returns only program-level rows (not episodes) for cleaner matching.
     """
+    w = _get_workspace_client()
+    result = w.api_client.do(
+        "POST",
+        "/api/2.0/sql/statements",
+        body={
+            "statement": f"""
+                SELECT DISTINCT
+                    content_id,
+                    COALESCE(title, content_name) AS title,
+                    content_type,
+                    import_id
+                FROM {CONTENT_TABLE}
+                WHERE content_type IN ('MOVIE', 'SERIES')
+                  AND is_episode = false
+                  AND active = true
+            """,
+            "warehouse_id": "a3ea80e7317d51e7",
+            "wait_timeout": "60s",
+        },
+    )
+
+    status = result.get("status", {}).get("state")
+    if status != "SUCCEEDED":
+        error = result.get("status", {}).get("error", {}).get("message", "Unknown error")
+        raise RuntimeError(f"Query failed: {error}")
+
+    columns = [c["name"] for c in result.get("manifest", {}).get("schema", {}).get("columns", [])]
+    rows = result.get("result", {}).get("data_array", [])
+    return [dict(zip(columns, row)) for row in rows]
+
+
+def _build_index(rows):
+    """Build normalized title -> list of records index."""
     index = {}
-    for row in catalog_rows:
+    for row in rows:
+        if not row.get("title"):
+            continue
         key = _normalize(row["title"])
-        entry = {**row, "source": "base"}
-        index.setdefault(key, []).append(entry)
-
-    if additions:
-        for row in additions:
-            key = _normalize(row["title"])
-            entry = {**row, "source": "user"}
-            index.setdefault(key, []).append(entry)
-
+        index.setdefault(key, []).append(row)
     return index
 
 
 def match_title(title: str, title_type: str, index: dict) -> dict:
     """Match a single title against the index.
 
-    Returns {input, type, contentId, status}
+    Returns {input, type, content_id, import_id, status}
     """
     norm = _normalize(title)
 
     candidates = index.get(norm, [])
     if title_type:
-        typed = [c for c in candidates if c["type"] == title_type]
+        typed = [c for c in candidates if c["content_type"] == title_type]
         if typed:
             candidates = typed
 
     if candidates:
-        user_entries = [c for c in candidates if c["source"] == "user"]
-        if user_entries:
-            latest = user_entries[-1]
+        if len(candidates) == 1:
+            c = candidates[0]
             return {
                 "input": title,
-                "type": latest["type"],
-                "contentId": latest["contentId"],
-                "status": "Match (user override)",
+                "type": c["content_type"],
+                "content_id": c["content_id"],
+                "import_id": c["import_id"],
+                "status": "Match",
             }
-        if len(set(c["contentId"] for c in candidates)) > 1:
-            ids = " / ".join(sorted(set(c["contentId"] for c in candidates)))
-            return {
-                "input": title,
-                "type": candidates[0]["type"],
-                "contentId": ids,
-                "status": "Multiple matches - verify",
-            }
+        ids = " / ".join(sorted(set(c["content_id"] for c in candidates)))
+        imports = " / ".join(sorted(set(c["import_id"] or "" for c in candidates)))
         return {
             "input": title,
-            "type": candidates[0]["type"],
-            "contentId": candidates[0]["contentId"],
-            "status": "Match",
+            "type": candidates[0]["content_type"],
+            "content_id": ids,
+            "import_id": imports,
+            "status": "Multiple matches - verify",
         }
 
     stripped = _normalize(_strip_year(title))
     if stripped != norm:
         candidates = index.get(stripped, [])
         if title_type:
-            typed = [c for c in candidates if c["type"] == title_type]
+            typed = [c for c in candidates if c["content_type"] == title_type]
             if typed:
                 candidates = typed
 
         if candidates:
-            user_entries = [c for c in candidates if c["source"] == "user"]
-            if user_entries:
-                latest = user_entries[-1]
+            if len(candidates) == 1:
+                c = candidates[0]
                 return {
                     "input": title,
-                    "type": latest["type"],
-                    "contentId": latest["contentId"],
-                    "status": "Fuzzy (user override)",
+                    "type": c["content_type"],
+                    "content_id": c["content_id"],
+                    "import_id": c["import_id"],
+                    "status": "Fuzzy",
                 }
-            if len(set(c["contentId"] for c in candidates)) > 1:
-                ids = " / ".join(sorted(set(c["contentId"] for c in candidates)))
-                return {
-                    "input": title,
-                    "type": candidates[0]["type"],
-                    "contentId": ids,
-                    "status": "Multiple matches - verify",
-                }
+            ids = " / ".join(sorted(set(c["content_id"] for c in candidates)))
+            imports = " / ".join(sorted(set(c["import_id"] or "" for c in candidates)))
             return {
                 "input": title,
-                "type": candidates[0]["type"],
-                "contentId": candidates[0]["contentId"],
-                "status": "Fuzzy",
+                "type": candidates[0]["content_type"],
+                "content_id": ids,
+                "import_id": imports,
+                "status": "Multiple matches - verify",
             }
 
     return {
         "input": title,
         "type": title_type or "",
-        "contentId": "NEW",
+        "content_id": "NEW",
+        "import_id": "",
         "status": "NEW",
     }
 
@@ -135,9 +154,6 @@ def parse_input_lines(text: str) -> list:
     Handles multi-column CSVs with quoted fields — always extracts
     column 1 as title and column 2 as type (if MOVIE/SERIES).
     """
-    import csv
-    import io
-
     results = []
     reader = csv.reader(io.StringIO(text.strip()))
     for row in reader:
@@ -155,188 +171,80 @@ def parse_input_lines(text: str) -> list:
     return results
 
 
-def render_sony_matcher():
-    """Render the Sony Content ID Matcher tool UI in Streamlit."""
+def render_content_id_matcher():
+    """Render the Content ID Matcher tool UI in Streamlit."""
     st.markdown("""
     <div style="padding: 12px 0 4px;">
         <div style="font-family:'Space Grotesk',sans-serif; font-size:22px; font-weight:700; letter-spacing:-0.02em; color:#1b1626;">
-            Sony Content ID Matcher
+            Content ID Matcher
         </div>
         <div style="font-size:13px; color:#8a8199; margin-top:4px;">
-            Upload or paste a list of titles to look up their Sony content IDs.
+            Paste or upload titles to look up their Tubi content IDs from the live database.
         </div>
     </div>
     """, unsafe_allow_html=True)
 
-    catalog = load_catalog()
+    try:
+        db_rows = _query_content_info()
+        index = _build_index(db_rows)
+        st.markdown(f"""
+        <div style="font-size:12px; color:#444; background:#f3f0f8; border-radius:8px; padding:8px 14px; display:inline-block; margin:8px 0 16px;">
+            Live database: {len(db_rows):,} active titles (movies + series) · refreshes hourly
+        </div>
+        """, unsafe_allow_html=True)
+    except Exception as e:
+        st.error(f"Failed to load content database: {e}")
+        return
 
-    if "sony_additions" not in st.session_state:
-        st.session_state.sony_additions = []
-
-    index = build_index(catalog, st.session_state.sony_additions)
-
-    total = len(catalog) + len(st.session_state.sony_additions)
-    st.markdown(f"""
-    <div style="font-size:12px; color:#444; background:#f3f0f8; border-radius:8px; padding:8px 14px; display:inline-block; margin:8px 0 16px;">
-        Catalog: {len(catalog):,} base titles + {len(st.session_state.sony_additions)} added = {total:,} total
-    </div>
-    """, unsafe_allow_html=True)
-
-    tab_match, tab_add = st.tabs(["Match Titles", "Add to Catalog"])
-
-    with tab_match:
-        col_input, col_upload = st.columns([3, 1])
-        with col_input:
-            input_text = st.text_area(
-                "Paste titles (one per line)",
-                placeholder="Carmen (2023)\nLost Girl\nSome Brand New Title",
-                height=150,
-                key="sony_input",
-            )
-        with col_upload:
-            uploaded = st.file_uploader("Or upload CSV/TXT", type=["csv", "txt"], key="sony_file")
-            if uploaded:
-                input_text = uploaded.read().decode("utf-8")
-
-        if st.button("Match Titles", type="primary", key="sony_match_btn"):
-            if input_text and input_text.strip():
-                parsed = parse_input_lines(input_text)
-                results = [match_title(title, ttype, index) for title, ttype in parsed]
-                st.session_state.sony_results = results
-            else:
-                st.warning("Paste or upload titles first.")
-
-        if "sony_results" in st.session_state and st.session_state.sony_results:
-            results = st.session_state.sony_results
-            df = pd.DataFrame(results)
-            df.index = range(1, len(df) + 1)
-            df.index.name = "#"
-
-            counts = {
-                "Match": len([r for r in results if r["status"].startswith("Match")]),
-                "Fuzzy": len([r for r in results if r["status"].startswith("Fuzzy")]),
-                "NEW": len([r for r in results if r["status"] == "NEW"]),
-                "Multiple": len([r for r in results if "Multiple" in r["status"]]),
-            }
-            cols = st.columns(4)
-            for col, (label, count) in zip(cols, counts.items()):
-                col.metric(label, count)
-
-            st.dataframe(
-                df.style.applymap(
-                    lambda v: "color: #b3261e; font-weight: 600" if v == "NEW" else "",
-                    subset=["contentId"],
-                ),
-                use_container_width=True,
-            )
-
-            col_dl, col_copy = st.columns([1, 1])
-            with col_dl:
-                csv = df.to_csv()
-                st.download_button("Download results (CSV)", csv, "sony_matches.csv", "text/csv")
-            with col_copy:
-                ids = "\n".join(r["contentId"] for r in results)
-                st.code(ids, language=None)
-
-            st.divider()
-            st.markdown("**Add NEW titles to catalog:**")
-            new_results = [r for r in results if r["status"] == "NEW"]
-            for idx, r in enumerate(new_results):
-                col_t, col_type, col_id, col_btn = st.columns([3, 1, 2, 1])
-                with col_t:
-                    st.text(r["input"])
-                with col_type:
-                    ttype = st.selectbox(
-                        "Type",
-                        ["MOVIE", "SERIES"],
-                        key=f"new_type_{idx}",
-                        label_visibility="collapsed",
-                    )
-                with col_id:
-                    cid = st.text_input(
-                        "Content ID",
-                        key=f"new_cid_{idx}",
-                        placeholder="e.g. 100060072",
-                        label_visibility="collapsed",
-                    )
-                with col_btn:
-                    if st.button("Add", key=f"new_add_{idx}"):
-                        if cid.strip():
-                            st.session_state.sony_additions.append({
-                                "title": r["input"],
-                                "type": ttype,
-                                "contentId": cid.strip(),
-                            })
-                            st.success(f"Added: {r['input']}")
-                            st.rerun()
-                        else:
-                            st.error("Enter a content ID")
-
-    with tab_add:
-        st.markdown("**Single entry:**")
-        col_t, col_type, col_id, col_btn = st.columns([3, 1, 2, 1])
-        with col_t:
-            add_title = st.text_input("Title", key="sony_add_title", placeholder="Title")
-        with col_type:
-            add_type = st.selectbox("Type", ["MOVIE", "SERIES"], key="sony_add_type")
-        with col_id:
-            add_cid = st.text_input("Content ID", key="sony_add_cid", placeholder="100012345")
-        with col_btn:
-            st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
-            if st.button("Add", key="sony_single_add"):
-                if add_title.strip() and add_cid.strip():
-                    st.session_state.sony_additions.append({
-                        "title": add_title.strip(),
-                        "type": add_type,
-                        "contentId": add_cid.strip(),
-                    })
-                    st.success(f"Added: {add_title.strip()}")
-                    st.rerun()
-                else:
-                    st.error("Title and Content ID are required")
-
-        st.divider()
-        st.markdown("**Bulk add** (one per line: `Title,Type,Content ID`):")
-        bulk_text = st.text_area(
-            "Bulk add",
-            key="sony_bulk",
-            placeholder="Some Title,MOVIE,100012345\nAnother Show,SERIES,300099887",
-            height=100,
-            label_visibility="collapsed",
+    col_input, col_upload = st.columns([3, 1])
+    with col_input:
+        input_text = st.text_area(
+            "Paste titles (one per line)",
+            placeholder="Carmen (2023)\nLost Girl\nSome New Title",
+            height=150,
+            key="matcher_input",
         )
-        if st.button("Add all", key="sony_bulk_add"):
-            added = 0
-            for line in bulk_text.strip().splitlines():
-                parts = line.split(",")
-                if len(parts) >= 3:
-                    t, tp, cid = parts[0].strip(), parts[1].strip().upper(), parts[2].strip()
-                    if t and cid and tp in ("MOVIE", "SERIES"):
-                        st.session_state.sony_additions.append({
-                            "title": t,
-                            "type": tp,
-                            "contentId": cid,
-                        })
-                        added += 1
-            if added:
-                st.success(f"Added {added} titles")
-                st.rerun()
-            else:
-                st.error("No valid entries found. Format: Title,MOVIE|SERIES,ContentID")
+    with col_upload:
+        uploaded = st.file_uploader("Or upload CSV/TXT", type=["csv", "txt"], key="matcher_file")
+        if uploaded:
+            input_text = uploaded.read().decode("utf-8")
 
-        st.divider()
-        col_export, col_clear = st.columns(2)
-        with col_export:
-            full_catalog = catalog + st.session_state.sony_additions
-            full_df = pd.DataFrame(full_catalog)
-            csv = full_df.to_csv(index=False)
-            st.download_button("Export full catalog (CSV)", csv, "sony_full_catalog.csv", "text/csv")
-        with col_clear:
-            if st.session_state.sony_additions:
-                if st.button("Clear all added titles", type="secondary"):
-                    st.session_state.sony_additions = []
-                    st.rerun()
+    if st.button("Match Titles", type="primary", key="matcher_btn"):
+        if input_text and input_text.strip():
+            parsed = parse_input_lines(input_text)
+            results = [match_title(title, ttype, index) for title, ttype in parsed]
+            st.session_state.matcher_results = results
+        else:
+            st.warning("Paste or upload titles first.")
 
-        if st.session_state.sony_additions:
-            st.markdown(f"**{len(st.session_state.sony_additions)} user-added titles:**")
-            add_df = pd.DataFrame(st.session_state.sony_additions)
-            st.dataframe(add_df, use_container_width=True, hide_index=True)
+    if "matcher_results" in st.session_state and st.session_state.matcher_results:
+        results = st.session_state.matcher_results
+        df = pd.DataFrame(results)
+        df.index = range(1, len(df) + 1)
+        df.index.name = "#"
+
+        counts = {
+            "Match": len([r for r in results if r["status"] == "Match"]),
+            "Fuzzy": len([r for r in results if r["status"] == "Fuzzy"]),
+            "NEW": len([r for r in results if r["status"] == "NEW"]),
+            "Multiple": len([r for r in results if "Multiple" in r["status"]]),
+        }
+        cols = st.columns(4)
+        for col, (label, count) in zip(cols, counts.items()):
+            col.metric(label, count)
+
+        st.dataframe(
+            df.style.applymap(
+                lambda v: "color: #b3261e; font-weight: 600" if v == "NEW" else "",
+                subset=["content_id"],
+            ),
+            use_container_width=True,
+        )
+
+        col_dl, col_copy = st.columns([1, 1])
+        with col_dl:
+            csv_out = df.to_csv()
+            st.download_button("Download results (CSV)", csv_out, "content_id_matches.csv", "text/csv")
+        with col_copy:
+            ids = "\n".join(r["content_id"] for r in results)
+            st.code(ids, language=None)

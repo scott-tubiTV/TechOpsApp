@@ -4,7 +4,7 @@ import os
 import pandas as pd
 import streamlit as st
 from genie_client import GenieClient
-from tools.sony_matcher import render_sony_matcher
+from tools.sony_matcher import render_content_id_matcher
 
 ADMIN_EMAILS = [
     "swhitney@tubi.tv",
@@ -15,10 +15,10 @@ TOOL_USERS = [
 ]
 
 TOOLS = {
-    "Sony Content ID Matcher": {
-        "icon": "🎬",
-        "description": "Look up Sony content IDs by title",
-        "renderer": render_sony_matcher,
+    "Content ID Matcher": {
+        "icon": "🔍",
+        "description": "Look up Tubi content IDs by title from the live database",
+        "renderer": render_content_id_matcher,
     },
 }
 
