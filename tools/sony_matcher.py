@@ -29,43 +29,26 @@ def _get_workspace_client():
     return WorkspaceClient()
 
 
-@st.cache_data(ttl=3600)
-def _query_content_info():
-    """Fetch title/content_id/content_type/import_id from content_info.
+WAREHOUSE_ID = "a6b9541289d75c6e"
 
-    Cached for 1 hour to avoid hammering compute on every match.
-    Uses the app's serverless SQL (no warehouse needed).
-    Returns only program-level rows (not episodes) for cleaner matching.
-    """
+
+def _execute_sql(query):
+    """Execute a SQL query and return rows as list of dicts."""
     import time
 
     w = _get_workspace_client()
-    query = f"""
-        SELECT DISTINCT
-            content_id,
-            COALESCE(title, content_name) AS title,
-            content_type,
-            import_id
-        FROM {CONTENT_TABLE}
-        WHERE content_type IN ('MOVIE', 'SERIES')
-          AND is_episode = false
-          AND active = true
-    """
-
-    # Use the same warehouse as the Genie space
     result = w.api_client.do(
         "POST",
         "/api/2.0/sql/statements",
         body={
             "statement": query,
-            "warehouse_id": "a6b9541289d75c6e",
+            "warehouse_id": WAREHOUSE_ID,
             "wait_timeout": "50s",
         },
     )
 
     status = result.get("status", {}).get("state")
 
-    # If the query is still running, poll for completion
     if status in ("PENDING", "RUNNING"):
         stmt_id = result.get("statement_id")
         for _ in range(30):
@@ -82,6 +65,39 @@ def _query_content_info():
     columns = [c["name"] for c in result.get("manifest", {}).get("schema", {}).get("columns", [])]
     rows = result.get("result", {}).get("data_array", [])
     return [dict(zip(columns, row)) for row in rows]
+
+
+@st.cache_data(ttl=3600)
+def _query_import_ids():
+    """Fetch all distinct import_ids from content_info."""
+    rows = _execute_sql(f"""
+        SELECT DISTINCT import_id
+        FROM {CONTENT_TABLE}
+        WHERE import_id IS NOT NULL AND import_id != ''
+          AND active = true
+        ORDER BY import_id
+    """)
+    return [r["import_id"] for r in rows]
+
+
+@st.cache_data(ttl=3600)
+def _query_content_info(import_id):
+    """Fetch titles for a specific import_id from content_info.
+
+    Cached for 1 hour. Filtered to the selected import_id.
+    """
+    return _execute_sql(f"""
+        SELECT DISTINCT
+            content_id,
+            COALESCE(title, content_name) AS title,
+            content_type,
+            import_id
+        FROM {CONTENT_TABLE}
+        WHERE content_type IN ('MOVIE', 'SERIES')
+          AND is_episode = false
+          AND active = true
+          AND import_id = '{import_id}'
+    """)
 
 
 def _build_index(rows):
@@ -201,6 +217,20 @@ def render_content_id_matcher():
     </div>
     """, unsafe_allow_html=True)
 
+    # Import ID selector
+    try:
+        import_ids = _query_import_ids()
+    except Exception as e:
+        st.error(f"Failed to load import IDs: {e}")
+        return
+
+    selected_import_id = st.selectbox(
+        "Select import_id to match against",
+        import_ids,
+        index=import_ids.index("sony-pictures") if "sony-pictures" in import_ids else 0,
+        key="matcher_import_id",
+    )
+
     col_input, col_upload = st.columns([3, 1])
     with col_input:
         input_text = st.text_area(
@@ -217,8 +247,8 @@ def render_content_id_matcher():
     if st.button("Match Titles", type="primary", key="matcher_btn"):
         if input_text and input_text.strip():
             try:
-                with st.spinner("Loading content database..."):
-                    db_rows = _query_content_info()
+                with st.spinner(f"Loading titles for {selected_import_id}..."):
+                    db_rows = _query_content_info(selected_import_id)
                     index = _build_index(db_rows)
                 parsed = parse_input_lines(input_text)
                 results = [match_title(title, ttype, index) for title, ttype in parsed]
