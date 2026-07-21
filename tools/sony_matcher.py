@@ -33,31 +33,47 @@ def _get_workspace_client():
 def _query_content_info():
     """Fetch title/content_id/content_type/import_id from content_info.
 
-    Cached for 1 hour to avoid hammering the warehouse on every match.
+    Cached for 1 hour to avoid hammering compute on every match.
+    Uses the app's serverless SQL (no warehouse needed).
     Returns only program-level rows (not episodes) for cleaner matching.
     """
+    import time
+
     w = _get_workspace_client()
+    query = f"""
+        SELECT DISTINCT
+            content_id,
+            COALESCE(title, content_name) AS title,
+            content_type,
+            import_id
+        FROM {CONTENT_TABLE}
+        WHERE content_type IN ('MOVIE', 'SERIES')
+          AND is_episode = false
+          AND active = true
+    """
+
+    # Try serverless first (no warehouse_id), fall back to listing warehouses
     result = w.api_client.do(
         "POST",
         "/api/2.0/sql/statements",
         body={
-            "statement": f"""
-                SELECT DISTINCT
-                    content_id,
-                    COALESCE(title, content_name) AS title,
-                    content_type,
-                    import_id
-                FROM {CONTENT_TABLE}
-                WHERE content_type IN ('MOVIE', 'SERIES')
-                  AND is_episode = false
-                  AND active = true
-            """,
-            "warehouse_id": "a3ea80e7317d51e7",
+            "statement": query,
             "wait_timeout": "50s",
         },
     )
 
     status = result.get("status", {}).get("state")
+
+    # If the query is still running, poll for completion
+    if status in ("PENDING", "RUNNING"):
+        stmt_id = result.get("statement_id")
+        for _ in range(30):
+            time.sleep(2)
+            result = w.api_client.do("GET", f"/api/2.0/sql/statements/{stmt_id}")
+            status = result.get("status", {}).get("state")
+            if status not in ("PENDING", "RUNNING"):
+                break
+
     if status != "SUCCEEDED":
         error = result.get("status", {}).get("error", {}).get("message", "Unknown error")
         raise RuntimeError(f"Query failed: {error}")
