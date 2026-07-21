@@ -130,24 +130,27 @@ def match_title(title: str, title_type: str, index: dict) -> dict:
 
 
 def parse_input_lines(text: str) -> list:
-    """Parse input text into list of (title, type) tuples."""
+    """Parse input text into list of (title, type) tuples.
+
+    Handles multi-column CSVs with quoted fields — always extracts
+    column 1 as title and column 2 as type (if MOVIE/SERIES).
+    """
+    import csv
+    import io
+
     results = []
-    for line in text.strip().splitlines():
-        line = line.strip()
-        if not line:
+    reader = csv.reader(io.StringIO(text.strip()))
+    for row in reader:
+        if not row or not row[0].strip():
             continue
-        if line.lower().startswith("title"):
+        title = row[0].strip()
+        if title.lower() == "title":
             continue
-        if "," in line:
-            parts = line.split(",", 1)
-            title = parts[0].strip().strip('"')
-            rest = parts[1].strip().strip('"').upper()
-            title_type = rest if rest in ("MOVIE", "SERIES") else ""
-            if not title_type:
-                title = line
-        else:
-            title = line
-            title_type = ""
+        title_type = ""
+        if len(row) > 1:
+            col2 = row[1].strip().upper()
+            if col2 in ("MOVIE", "SERIES"):
+                title_type = col2
         results.append((title, title_type))
     return results
 
