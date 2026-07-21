@@ -4,10 +4,23 @@ import os
 import pandas as pd
 import streamlit as st
 from genie_client import GenieClient
+from tools.sony_matcher import render_sony_matcher
 
 ADMIN_EMAILS = [
     "swhitney@tubi.tv",
 ]
+
+TOOL_USERS = [
+    "swhitney@tubi.tv",
+]
+
+TOOLS = {
+    "Sony Content ID Matcher": {
+        "icon": "🎬",
+        "description": "Look up Sony content IDs by title",
+        "renderer": render_sony_matcher,
+    },
+}
 
 GENIE_SPACES = {
     "Content Metrics": {
@@ -196,6 +209,10 @@ def is_admin(email):
     return email and email.lower() in [e.lower() for e in ADMIN_EMAILS]
 
 
+def has_tool_access(email):
+    return email and email.lower() in [e.lower() for e in TOOL_USERS]
+
+
 def get_user_display_name(email):
     if email and "@" in email:
         name = email.split("@")[0]
@@ -233,6 +250,8 @@ def init_session_state():
         st.session_state.active_space = list(GENIE_SPACES.keys())[0]
     if "auto_route" not in st.session_state:
         st.session_state.auto_route = True
+    if "active_tool" not in st.session_state:
+        st.session_state.active_tool = None
 
 
 def clear_conversation():
@@ -303,6 +322,31 @@ def main():
                 clear_conversation()
                 st.rerun()
 
+        # Tools section (permission-gated)
+        if has_tool_access(user_email):
+            st.divider()
+            st.markdown("""
+            <div style="font-size:10.5px; font-weight:700; letter-spacing:0.13em; color:#9990a8; text-transform:uppercase; padding:0 0 8px;">
+                Tools
+            </div>
+            """, unsafe_allow_html=True)
+
+            for tool_name, tool_config in TOOLS.items():
+                is_active = st.session_state.active_tool == tool_name
+                style = "font-weight:700; background:#ece7f7; border-radius:8px;" if is_active else ""
+                if st.button(
+                    f"{tool_config['icon']}  {tool_name}",
+                    key=f"tool_{tool_name}",
+                    use_container_width=True,
+                ):
+                    st.session_state.active_tool = tool_name
+                    st.rerun()
+
+            if st.session_state.active_tool:
+                if st.button("← Back to Chat", key="back_to_chat", use_container_width=True):
+                    st.session_state.active_tool = None
+                    st.rerun()
+
         # Spacer + user profile at bottom
         st.markdown("<div style='flex:1;'></div>", unsafe_allow_html=True)
         st.divider()
@@ -316,6 +360,13 @@ def main():
             </div>
         </div>
         """, unsafe_allow_html=True)
+
+    # If a tool is active, render it instead of chat
+    if st.session_state.active_tool and has_tool_access(user_email):
+        tool_config = TOOLS.get(st.session_state.active_tool)
+        if tool_config:
+            tool_config["renderer"]()
+        return
 
     # Handle pending suggestion (from welcome cards)
     pending = st.session_state.pop("_pending_suggestion", None)
