@@ -480,13 +480,13 @@ def render_content_id_matcher():
         if "candidate_details" not in st.session_state:
             st.session_state.candidate_details = {}
 
-        # Find indices needing verification
+        # Find indices needing verification (multiples + fuzzy)
         verify_indices = [
             i for i, r in enumerate(results)
-            if r["status"] == "Multiple matches - verify"
+            if r["status"] in ("Multiple matches - verify", "Fuzzy")
         ]
 
-        # Load candidate details once
+        # Load candidate details once for all content_ids needing verification
         if verify_indices and not st.session_state.candidate_details:
             all_cids = set()
             for i in verify_indices:
@@ -504,7 +504,15 @@ def render_content_id_matcher():
             if i in st.session_state.verify_decisions:
                 decision = st.session_state.verify_decisions[i]
                 if decision == "__skip__":
-                    row["status"] = "Multiple matches - skipped"
+                    if r["status"] == "Multiple matches - verify":
+                        row["status"] = "Multiple matches - skipped"
+                    else:
+                        row["status"] = "Fuzzy - skipped"
+                elif decision == "__new__":
+                    row["content_id"] = "NEW"
+                    row["status"] = "NEW"
+                elif decision == "__confirm__":
+                    row["status"] = "Match"
                 else:
                     row["content_id"] = decision
                     row["status"] = "Match"
@@ -528,21 +536,33 @@ def render_content_id_matcher():
 
                 current_result_idx = unresolved[current_pos]
                 current_result = results[current_result_idx]
+                is_fuzzy = current_result["status"] == "Fuzzy"
                 cids = [cid.strip() for cid in current_result["content_id"].split(" / ")]
                 details = st.session_state.candidate_details
 
+                if is_fuzzy:
+                    wizard_title = "Confirm Fuzzy Match"
+                    wizard_prompt = f"Is <strong>{cids[0]}</strong> the correct match for <strong>{current_result['input']}</strong>?"
+                    wizard_bg = "#fffbeb"
+                    wizard_border = "#fde68a"
+                else:
+                    wizard_title = "Verify Match"
+                    wizard_prompt = f"Which content_id is correct for <strong>{current_result['input']}</strong>?"
+                    wizard_bg = "#faf5ff"
+                    wizard_border = "#e9d5ff"
+
                 st.markdown(f"""
-                <div style="background:#faf5ff; border:1px solid #e9d5ff; border-radius:12px; padding:16px 20px; margin:12px 0;">
+                <div style="background:{wizard_bg}; border:1px solid {wizard_border}; border-radius:12px; padding:16px 20px; margin:12px 0;">
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
                         <div style="font-family:'Space Grotesk',sans-serif; font-size:16px; font-weight:700; color:#1b1626;">
-                            Verify Match
+                            {wizard_title}
                         </div>
                         <div style="font-size:12px; color:#8a8199; font-weight:600;">
                             {completed + current_pos + 1} of {total_to_verify}
                         </div>
                     </div>
                     <div style="font-size:14px; color:#4b4458; margin-bottom:4px;">
-                        Which content_id is correct for <strong>{current_result['input']}</strong>?
+                        {wizard_prompt}
                     </div>
                 </div>
                 """, unsafe_allow_html=True)
@@ -564,30 +584,54 @@ def render_content_id_matcher():
                         </div>
                         """, unsafe_allow_html=True)
                     with row_col2:
-                        if st.button(
-                            "Select",
-                            key=f"verify_select_{current_result_idx}_{cid}",
-                            use_container_width=True,
-                        ):
-                            st.session_state.verify_decisions[current_result_idx] = cid
-                            try:
-                                user_email = _get_user_email()
-                                _record_verification(
-                                    current_result["input"],
-                                    current_result.get("import_id", ""),
-                                    cid,
-                                    cids,
-                                    user_email,
-                                )
-                            except Exception:
-                                pass
-                            if current_pos + 1 < len(unresolved):
-                                st.session_state.verify_index = current_pos + 1
-                            else:
-                                st.session_state.verify_index = 0
-                            st.rerun()
+                        if is_fuzzy:
+                            if st.button(
+                                "Confirm",
+                                key=f"verify_select_{current_result_idx}_{cid}",
+                                use_container_width=True,
+                            ):
+                                st.session_state.verify_decisions[current_result_idx] = "__confirm__"
+                                try:
+                                    user_email = _get_user_email()
+                                    _record_verification(
+                                        current_result["input"],
+                                        current_result.get("import_id", ""),
+                                        cid,
+                                        cids,
+                                        user_email,
+                                    )
+                                except Exception:
+                                    pass
+                                if current_pos + 1 < len(unresolved):
+                                    st.session_state.verify_index = current_pos + 1
+                                else:
+                                    st.session_state.verify_index = 0
+                                st.rerun()
+                        else:
+                            if st.button(
+                                "Select",
+                                key=f"verify_select_{current_result_idx}_{cid}",
+                                use_container_width=True,
+                            ):
+                                st.session_state.verify_decisions[current_result_idx] = cid
+                                try:
+                                    user_email = _get_user_email()
+                                    _record_verification(
+                                        current_result["input"],
+                                        current_result.get("import_id", ""),
+                                        cid,
+                                        cids,
+                                        user_email,
+                                    )
+                                except Exception:
+                                    pass
+                                if current_pos + 1 < len(unresolved):
+                                    st.session_state.verify_index = current_pos + 1
+                                else:
+                                    st.session_state.verify_index = 0
+                                st.rerun()
 
-                nav_col1, nav_col2, nav_col3 = st.columns([1, 1, 4])
+                nav_col1, nav_col2, nav_col3, nav_col4 = st.columns([1, 1, 1, 3])
                 with nav_col1:
                     if st.button("← Back", key="verify_back", disabled=(current_pos == 0 and completed == 0)):
                         if current_pos > 0:
@@ -609,6 +653,15 @@ def render_content_id_matcher():
                         else:
                             st.session_state.verify_index = 0
                         st.rerun()
+                with nav_col3:
+                    if is_fuzzy:
+                        if st.button("Mark NEW", key="verify_new"):
+                            st.session_state.verify_decisions[current_result_idx] = "__new__"
+                            if current_pos + 1 < len(unresolved):
+                                st.session_state.verify_index = current_pos + 1
+                            else:
+                                st.session_state.verify_index = 0
+                            st.rerun()
             else:
                 st.markdown(f"""
                 <div style="background:#ecfdf5; border:1px solid #a7f3d0; border-radius:12px; padding:12px 16px; margin:12px 0;">
@@ -641,7 +694,7 @@ def render_content_id_matcher():
             use_container_width=True,
         )
 
-        matched = [r for r in display_results if r["status"] in ("Match", "Fuzzy")]
+        matched = [r for r in display_results if r["status"] == "Match"]
         new_only = [r for r in display_results if r["status"] == "NEW"]
 
         col1, col2, col3 = st.columns(3)
