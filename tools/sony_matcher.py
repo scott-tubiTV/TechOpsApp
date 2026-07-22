@@ -283,10 +283,18 @@ def render_content_id_matcher():
             use_container_width=True,
         )
 
-        col_dl, col_copy = st.columns([1, 1])
-        with col_dl:
-            csv_out = df.to_csv()
-            st.download_button("Download results (CSV)", csv_out, "content_id_matches.csv", "text/csv")
-        with col_copy:
-            ids = "\n".join(r["content_id"] for r in results)
-            st.code(ids, language=None)
+        matched = [r for r in results if r["status"] in ("Match", "Fuzzy", "Multiple matches - verify")]
+        new_only = [r for r in results if r["status"] == "NEW"]
+
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            csv_all = df.to_csv()
+            st.download_button("Download all results", csv_all, "content_id_matches.csv", "text/csv")
+        with col2:
+            if matched:
+                df_matched = pd.DataFrame(matched)
+                st.download_button("Download matches only", df_matched.to_csv(index=False), "matched_titles.csv", "text/csv")
+        with col3:
+            if new_only:
+                df_new = pd.DataFrame(new_only)
+                st.download_button("Download NEW only", df_new.to_csv(index=False), "new_titles.csv", "text/csv")
