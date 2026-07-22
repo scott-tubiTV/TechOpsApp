@@ -4,6 +4,7 @@ import csv
 import io
 import re
 import unicodedata
+from datetime import datetime, timezone
 
 import pandas as pd
 import streamlit as st
@@ -11,6 +12,7 @@ from databricks.sdk import WorkspaceClient
 
 AVAIL_MOVIES = "core_prod.contentavails_cdc.avail_movies"
 AVAIL_SERIES = "core_prod.contentavails_cdc.avail_series"
+VERIFICATIONS_TABLE = "core_dev.techops.content_id_verifications"
 
 
 def _normalize(text: str) -> str:
@@ -31,6 +33,22 @@ def _get_workspace_client():
 
 
 WAREHOUSE_ID = "a6b9541289d75c6e"
+
+
+def _get_user_email():
+    """Get current user email for verification recording."""
+    try:
+        user_info = st.experimental_user
+        if user_info and user_info.get("email"):
+            return user_info["email"]
+    except Exception:
+        pass
+    headers = st.context.headers
+    for h in ["X-Forwarded-Email", "X-Forwarded-Preferred-Username", "x-forwarded-email", "X-Databricks-User-Email"]:
+        val = headers.get(h)
+        if val:
+            return val
+    return "unknown"
 
 
 def _execute_sql(query):
@@ -117,6 +135,25 @@ def _check_active_status(content_ids):
     return {r["content_id"]: str(r["active"]).lower() == "true" for r in rows}
 
 
+def _get_candidate_details(content_ids):
+    """Fetch title + active status from content_info for a list of content_ids."""
+    if not content_ids:
+        return {}
+    id_list = ", ".join(f"'{cid}'" for cid in content_ids)
+    rows = _execute_sql(f"""
+        SELECT content_id, title, active
+        FROM {CONTENT_INFO}
+        WHERE content_id IN ({id_list})
+    """)
+    return {
+        r["content_id"]: {
+            "title": r.get("title", ""),
+            "active": str(r.get("active", "")).lower() == "true",
+        }
+        for r in rows
+    }
+
+
 def _resolve_multiple_matches(results):
     """Post-process results: auto-resolve multiples where only one content_id is active."""
     multi_indices = [
@@ -141,6 +178,18 @@ def _resolve_multiple_matches(results):
             results[i]["status"] = "Match"
 
     return results
+
+
+def _record_verification(title, import_id, selected_content_id, candidate_ids, selected_by):
+    """Write a verification record to the Delta table."""
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    candidates_str = ",".join(candidate_ids)
+    _execute_sql(f"""
+        INSERT INTO {VERIFICATIONS_TABLE}
+        (title, import_id, selected_content_id, candidate_ids, selected_by, selected_at)
+        VALUES ('{title.replace("'", "''")}', '{import_id}', '{selected_content_id}',
+                '{candidates_str}', '{selected_by}', '{ts}')
+    """)
 
 
 def _build_index(rows):
@@ -297,6 +346,9 @@ def render_content_id_matcher():
                 results = [match_title(title, ttype, index) for title, ttype in parsed]
                 results = _resolve_multiple_matches(results)
                 st.session_state.matcher_results = results
+                st.session_state.verify_index = 0
+                st.session_state.verify_decisions = {}
+                st.session_state.candidate_details = {}
             except Exception as e:
                 st.error(f"Failed to load content database: {e}")
         else:
@@ -304,15 +356,151 @@ def render_content_id_matcher():
 
     if "matcher_results" in st.session_state and st.session_state.matcher_results:
         results = st.session_state.matcher_results
-        df = pd.DataFrame(results)
+
+        # Initialize verification state
+        if "verify_index" not in st.session_state:
+            st.session_state.verify_index = 0
+        if "verify_decisions" not in st.session_state:
+            st.session_state.verify_decisions = {}
+        if "candidate_details" not in st.session_state:
+            st.session_state.candidate_details = {}
+
+        # Find indices needing verification
+        verify_indices = [
+            i for i, r in enumerate(results)
+            if r["status"] == "Multiple matches - verify"
+        ]
+
+        # Load candidate details once
+        if verify_indices and not st.session_state.candidate_details:
+            all_cids = set()
+            for i in verify_indices:
+                for cid in results[i]["content_id"].split(" / "):
+                    all_cids.add(cid.strip())
+            try:
+                st.session_state.candidate_details = _get_candidate_details(list(all_cids))
+            except Exception:
+                st.session_state.candidate_details = {}
+
+        # Apply decisions to results for display/export
+        display_results = []
+        for i, r in enumerate(results):
+            row = r.copy()
+            if i in st.session_state.verify_decisions:
+                decision = st.session_state.verify_decisions[i]
+                if decision == "__skip__":
+                    row["status"] = "Multiple matches - skipped"
+                else:
+                    row["content_id"] = decision
+                    row["status"] = "Match"
+            display_results.append(row)
+
+        # Verification wizard
+        unresolved = [
+            idx for idx in verify_indices
+            if idx not in st.session_state.verify_decisions
+        ]
+
+        if verify_indices:
+            total_to_verify = len(verify_indices)
+            completed = total_to_verify - len(unresolved)
+
+            if unresolved:
+                current_pos = st.session_state.verify_index
+                if current_pos >= len(unresolved):
+                    current_pos = len(unresolved) - 1
+                    st.session_state.verify_index = current_pos
+
+                current_result_idx = unresolved[current_pos]
+                current_result = results[current_result_idx]
+                cids = [cid.strip() for cid in current_result["content_id"].split(" / ")]
+                details = st.session_state.candidate_details
+
+                st.markdown(f"""
+                <div style="background:#faf5ff; border:1px solid #e9d5ff; border-radius:12px; padding:16px 20px; margin:12px 0;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                        <div style="font-family:'Space Grotesk',sans-serif; font-size:16px; font-weight:700; color:#1b1626;">
+                            Verify Match
+                        </div>
+                        <div style="font-size:12px; color:#8a8199; font-weight:600;">
+                            {completed + current_pos + 1} of {total_to_verify}
+                        </div>
+                    </div>
+                    <div style="font-size:14px; color:#4b4458; margin-bottom:4px;">
+                        Which content_id is correct for <strong>{current_result['input']}</strong>?
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+
+                for cid in cids:
+                    info = details.get(cid, {})
+                    ci_title = info.get("title", "Unknown")
+                    active = info.get("active", False)
+                    active_badge = '<span style="color:#059669; font-weight:600;">Active</span>' if active else '<span style="color:#b3261e; font-weight:600;">Inactive</span>'
+                    if st.button(
+                        f"{cid} — {ci_title} — {'Active' if active else 'Inactive'}",
+                        key=f"verify_select_{current_result_idx}_{cid}",
+                        use_container_width=True,
+                    ):
+                        st.session_state.verify_decisions[current_result_idx] = cid
+                        try:
+                            user_email = _get_user_email()
+                            _record_verification(
+                                current_result["input"],
+                                current_result.get("import_id", ""),
+                                cid,
+                                cids,
+                                user_email,
+                            )
+                        except Exception:
+                            pass
+                        if current_pos + 1 < len(unresolved):
+                            st.session_state.verify_index = current_pos + 1
+                        else:
+                            st.session_state.verify_index = 0
+                        st.rerun()
+
+                nav_col1, nav_col2, nav_col3 = st.columns([1, 1, 4])
+                with nav_col1:
+                    if st.button("← Back", key="verify_back", disabled=(current_pos == 0 and completed == 0)):
+                        if current_pos > 0:
+                            st.session_state.verify_index = current_pos - 1
+                        elif completed > 0:
+                            decided_indices = sorted(
+                                idx for idx in verify_indices
+                                if idx in st.session_state.verify_decisions
+                            )
+                            if decided_indices:
+                                del st.session_state.verify_decisions[decided_indices[-1]]
+                                st.session_state.verify_index = 0
+                        st.rerun()
+                with nav_col2:
+                    if st.button("Skip →", key="verify_skip"):
+                        st.session_state.verify_decisions[current_result_idx] = "__skip__"
+                        if current_pos + 1 < len(unresolved):
+                            st.session_state.verify_index = current_pos + 1
+                        else:
+                            st.session_state.verify_index = 0
+                        st.rerun()
+            else:
+                st.markdown(f"""
+                <div style="background:#ecfdf5; border:1px solid #a7f3d0; border-radius:12px; padding:12px 16px; margin:12px 0;">
+                    <span style="font-size:14px; color:#065f46; font-weight:600;">
+                        ✓ All {total_to_verify} verification{'s' if total_to_verify > 1 else ''} complete
+                    </span>
+                </div>
+                """, unsafe_allow_html=True)
+
+        # Results table (reflects live decisions)
+        df = pd.DataFrame(display_results)
         df.index = range(1, len(df) + 1)
         df.index.name = "#"
 
         counts = {
-            "Match": len([r for r in results if r["status"] == "Match"]),
-            "Fuzzy": len([r for r in results if r["status"] == "Fuzzy"]),
-            "NEW": len([r for r in results if r["status"] == "NEW"]),
-            "Multiple": len([r for r in results if "Multiple" in r["status"]]),
+            "Match": len([r for r in display_results if r["status"] == "Match"]),
+            "Fuzzy": len([r for r in display_results if r["status"] == "Fuzzy"]),
+            "NEW": len([r for r in display_results if r["status"] == "NEW"]),
+            "Multiple": len([r for r in display_results if "Multiple" in r["status"]]),
         }
         cols = st.columns(4)
         for col, (label, count) in zip(cols, counts.items()):
@@ -326,8 +514,8 @@ def render_content_id_matcher():
             use_container_width=True,
         )
 
-        matched = [r for r in results if r["status"] in ("Match", "Fuzzy", "Multiple matches - verify")]
-        new_only = [r for r in results if r["status"] == "NEW"]
+        matched = [r for r in display_results if r["status"] in ("Match", "Fuzzy")]
+        new_only = [r for r in display_results if r["status"] == "NEW"]
 
         col1, col2, col3 = st.columns(3)
         with col1:
