@@ -27,6 +27,19 @@ def _strip_year(text: str) -> str:
     return re.sub(r"\s*\(\d{4}\)\s*$", "", text).strip()
 
 
+def _strip_parentheticals(text: str) -> str:
+    """Strip all parenthetical suffixes: (MIRAMAX), (CBS FILMS), (2005), (S), etc."""
+    return re.sub(r"\s*\([^)]*\)", "", text).strip()
+
+
+def _reposition_article(norm_text: str) -> str:
+    """Move trailing article to front: 'hunt for red october the' -> 'the hunt for red october'."""
+    for article in ("the", "a", "an"):
+        if norm_text.endswith(" " + article):
+            return article + " " + norm_text[: -(len(article) + 1)]
+    return norm_text
+
+
 @st.cache_resource
 def _get_workspace_client():
     return WorkspaceClient()
@@ -193,13 +206,25 @@ def _record_verification(title, import_id, selected_content_id, candidate_ids, s
 
 
 def _build_index(rows):
-    """Build normalized title -> list of records index."""
+    """Build normalized title -> list of records index.
+
+    Also indexes article-repositioned and parenthetical-stripped forms.
+    """
     index = {}
     for row in rows:
         if not row.get("title"):
             continue
         key = _normalize(row["title"])
         index.setdefault(key, []).append(row)
+        repo = _reposition_article(key)
+        if repo != key:
+            index.setdefault(repo, []).append(row)
+        stripped = _normalize(_strip_parentheticals(row["title"]))
+        if stripped != key:
+            index.setdefault(stripped, []).append(row)
+            repo_stripped = _reposition_article(stripped)
+            if repo_stripped != stripped:
+                index.setdefault(repo_stripped, []).append(row)
     return index
 
 
@@ -236,6 +261,35 @@ def match_title(title: str, title_type: str, index: dict) -> dict:
             "status": "Multiple matches - verify",
         }
 
+    # Try article repositioning: "title the" -> "the title"
+    repositioned = _reposition_article(norm)
+    if repositioned != norm:
+        candidates = index.get(repositioned, [])
+        if title_type:
+            typed = [c for c in candidates if c["content_type"] == title_type]
+            if typed:
+                candidates = typed
+
+        if candidates:
+            if len(candidates) == 1:
+                c = candidates[0]
+                return {
+                    "input": title,
+                    "type": c["content_type"],
+                    "content_id": c["content_id"],
+                    "import_id": c["import_id"],
+                    "status": "Fuzzy",
+                }
+            ids = " / ".join(sorted(set(c["content_id"] for c in candidates)))
+            imports = " / ".join(sorted(set(c["import_id"] or "" for c in candidates)))
+            return {
+                "input": title,
+                "type": candidates[0]["content_type"],
+                "content_id": ids,
+                "import_id": imports,
+                "status": "Multiple matches - verify",
+            }
+
     stripped = _normalize(_strip_year(title))
     if stripped != norm:
         candidates = index.get(stripped, [])
@@ -263,6 +317,67 @@ def match_title(title: str, title_type: str, index: dict) -> dict:
                 "import_id": imports,
                 "status": "Multiple matches - verify",
             }
+
+    # Try both: strip year then reposition article
+    if stripped != norm:
+        repo_stripped = _reposition_article(stripped)
+        if repo_stripped != stripped:
+            candidates = index.get(repo_stripped, [])
+            if title_type:
+                typed = [c for c in candidates if c["content_type"] == title_type]
+                if typed:
+                    candidates = typed
+
+            if candidates:
+                if len(candidates) == 1:
+                    c = candidates[0]
+                    return {
+                        "input": title,
+                        "type": c["content_type"],
+                        "content_id": c["content_id"],
+                        "import_id": c["import_id"],
+                        "status": "Fuzzy",
+                    }
+                ids = " / ".join(sorted(set(c["content_id"] for c in candidates)))
+                imports = " / ".join(sorted(set(c["import_id"] or "" for c in candidates)))
+                return {
+                    "input": title,
+                    "type": candidates[0]["content_type"],
+                    "content_id": ids,
+                    "import_id": imports,
+                    "status": "Multiple matches - verify",
+                }
+
+    # Strip all parentheticals and try with article reposition combos
+    no_parens = _normalize(_strip_parentheticals(title))
+    if no_parens != norm:
+        for variant in (no_parens, _reposition_article(no_parens)):
+            if variant == norm:
+                continue
+            candidates = index.get(variant, [])
+            if title_type:
+                typed = [c for c in candidates if c["content_type"] == title_type]
+                if typed:
+                    candidates = typed
+            if candidates:
+                if len(candidates) == 1:
+                    c = candidates[0]
+                    return {
+                        "input": title,
+                        "type": c["content_type"],
+                        "content_id": c["content_id"],
+                        "import_id": c["import_id"],
+                        "status": "Fuzzy",
+                    }
+                ids = " / ".join(sorted(set(c["content_id"] for c in candidates)))
+                imports = " / ".join(sorted(set(c["import_id"] or "" for c in candidates)))
+                return {
+                    "input": title,
+                    "type": candidates[0]["content_type"],
+                    "content_id": ids,
+                    "import_id": imports,
+                    "status": "Multiple matches - verify",
+                }
 
     return {
         "input": title,
