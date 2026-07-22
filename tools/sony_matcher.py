@@ -205,6 +205,35 @@ def _record_verification(title, import_id, selected_content_id, candidate_ids, s
     """)
 
 
+@st.cache_data(ttl=3600)
+def _load_prior_verifications(import_id):
+    """Load previously verified title→content_id mappings for an import_id."""
+    rows = _execute_sql(f"""
+        SELECT title, selected_content_id
+        FROM {VERIFICATIONS_TABLE}
+        WHERE import_id = '{import_id}'
+    """)
+    lookup = {}
+    for r in rows:
+        lookup[_normalize(r["title"])] = r["selected_content_id"]
+    return lookup
+
+
+def _apply_prior_verifications(results, import_id):
+    """Auto-resolve fuzzy/multiple matches using prior user verifications."""
+    prior = _load_prior_verifications(import_id)
+    if not prior:
+        return results
+    for r in results:
+        if r["status"] not in ("Fuzzy", "Multiple matches - verify"):
+            continue
+        norm_title = _normalize(r["input"])
+        if norm_title in prior:
+            r["content_id"] = prior[norm_title]
+            r["status"] = "Match"
+    return results
+
+
 def _build_index(rows):
     """Build normalized title -> list of records index.
 
@@ -460,6 +489,7 @@ def render_content_id_matcher():
                 parsed = parse_input_lines(input_text)
                 results = [match_title(title, ttype, index) for title, ttype in parsed]
                 results = _resolve_multiple_matches(results)
+                results = _apply_prior_verifications(results, selected_import_id)
                 st.session_state.matcher_results = results
                 st.session_state.verify_index = 0
                 st.session_state.verify_decisions = {}
