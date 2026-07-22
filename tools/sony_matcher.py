@@ -436,29 +436,41 @@ def render_content_id_matcher():
                     info = details.get(cid, {})
                     ci_title = info.get("title", "Unknown")
                     active = info.get("active", False)
-                    active_badge = '<span style="color:#059669; font-weight:600;">Active</span>' if active else '<span style="color:#b3261e; font-weight:600;">Inactive</span>'
-                    if st.button(
-                        f"{cid} — {ci_title} — {'Active' if active else 'Inactive'}",
-                        key=f"verify_select_{current_result_idx}_{cid}",
-                        use_container_width=True,
-                    ):
-                        st.session_state.verify_decisions[current_result_idx] = cid
-                        try:
-                            user_email = _get_user_email()
-                            _record_verification(
-                                current_result["input"],
-                                current_result.get("import_id", ""),
-                                cid,
-                                cids,
-                                user_email,
-                            )
-                        except Exception:
-                            pass
-                        if current_pos + 1 < len(unresolved):
-                            st.session_state.verify_index = current_pos + 1
-                        else:
-                            st.session_state.verify_index = 0
-                        st.rerun()
+                    active_color = "#059669" if active else "#b3261e"
+                    active_label = "Active" if active else "Inactive"
+
+                    row_col1, row_col2 = st.columns([5, 1])
+                    with row_col1:
+                        st.markdown(f"""
+                        <div style="display:flex; align-items:center; gap:12px; padding:8px 12px; background:#fff; border:1px solid #e7e3ee; border-radius:8px; margin-bottom:4px;">
+                            <code style="font-size:14px; font-weight:600; color:#1b1626; user-select:all; cursor:text;">{cid}</code>
+                            <span style="font-size:13px; color:#4b4458;">— {ci_title}</span>
+                            <span style="font-size:12px; font-weight:600; color:{active_color};">{active_label}</span>
+                        </div>
+                        """, unsafe_allow_html=True)
+                    with row_col2:
+                        if st.button(
+                            "Select",
+                            key=f"verify_select_{current_result_idx}_{cid}",
+                            use_container_width=True,
+                        ):
+                            st.session_state.verify_decisions[current_result_idx] = cid
+                            try:
+                                user_email = _get_user_email()
+                                _record_verification(
+                                    current_result["input"],
+                                    current_result.get("import_id", ""),
+                                    cid,
+                                    cids,
+                                    user_email,
+                                )
+                            except Exception:
+                                pass
+                            if current_pos + 1 < len(unresolved):
+                                st.session_state.verify_index = current_pos + 1
+                            else:
+                                st.session_state.verify_index = 0
+                            st.rerun()
 
                 nav_col1, nav_col2, nav_col3 = st.columns([1, 1, 4])
                 with nav_col1:
