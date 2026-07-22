@@ -101,6 +101,48 @@ def _query_avails(import_id):
     """)
 
 
+CONTENT_INFO = "core_prod.content.content_info"
+
+
+def _check_active_status(content_ids):
+    """Query content_info.active for a batch of content_ids. Returns {content_id: bool}."""
+    if not content_ids:
+        return {}
+    id_list = ", ".join(f"'{cid}'" for cid in content_ids)
+    rows = _execute_sql(f"""
+        SELECT content_id, active
+        FROM {CONTENT_INFO}
+        WHERE content_id IN ({id_list})
+    """)
+    return {r["content_id"]: str(r["active"]).lower() == "true" for r in rows}
+
+
+def _resolve_multiple_matches(results):
+    """Post-process results: auto-resolve multiples where only one content_id is active."""
+    multi_indices = [
+        i for i, r in enumerate(results)
+        if r["status"] == "Multiple matches - verify"
+    ]
+    if not multi_indices:
+        return results
+
+    all_cids = set()
+    for i in multi_indices:
+        for cid in results[i]["content_id"].split(" / "):
+            all_cids.add(cid.strip())
+
+    active_map = _check_active_status(list(all_cids))
+
+    for i in multi_indices:
+        cids = [cid.strip() for cid in results[i]["content_id"].split(" / ")]
+        active_cids = [cid for cid in cids if active_map.get(cid, False)]
+        if len(active_cids) == 1:
+            results[i]["content_id"] = active_cids[0]
+            results[i]["status"] = "Match"
+
+    return results
+
+
 def _build_index(rows):
     """Build normalized title -> list of records index."""
     index = {}
@@ -253,6 +295,7 @@ def render_content_id_matcher():
                     index = _build_index(db_rows)
                 parsed = parse_input_lines(input_text)
                 results = [match_title(title, ttype, index) for title, ttype in parsed]
+                results = _resolve_multiple_matches(results)
                 st.session_state.matcher_results = results
             except Exception as e:
                 st.error(f"Failed to load content database: {e}")
