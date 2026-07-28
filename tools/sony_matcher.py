@@ -149,12 +149,12 @@ def _check_active_status(content_ids):
 
 
 def _get_candidate_details(content_ids):
-    """Fetch title + active status from content_info for a list of content_ids."""
+    """Fetch title, active, release_year, language from content_info."""
     if not content_ids:
         return {}
     id_list = ", ".join(f"'{cid}'" for cid in content_ids)
     rows = _execute_sql(f"""
-        SELECT content_id, title, active
+        SELECT content_id, title, active, release_year, language
         FROM {CONTENT_INFO}
         WHERE content_id IN ({id_list})
     """)
@@ -162,13 +162,15 @@ def _get_candidate_details(content_ids):
         r["content_id"]: {
             "title": r.get("title", ""),
             "active": str(r.get("active", "")).lower() == "true",
+            "release_year": str(r.get("release_year", "") or ""),
+            "language": r.get("language", "") or "",
         }
         for r in rows
     }
 
 
-def _resolve_multiple_matches(results):
-    """Post-process results: auto-resolve multiples where only one content_id is active."""
+def _resolve_multiple_matches(results, parsed_metadata=None):
+    """Post-process results: auto-resolve multiples using active status, release_year, language."""
     multi_indices = [
         i for i, r in enumerate(results)
         if r["status"] == "Multiple matches - verify"
@@ -181,14 +183,56 @@ def _resolve_multiple_matches(results):
         for cid in results[i]["content_id"].split(" / "):
             all_cids.add(cid.strip())
 
-    active_map = _check_active_status(list(all_cids))
+    details_map = _get_candidate_details(list(all_cids))
 
     for i in multi_indices:
         cids = [cid.strip() for cid in results[i]["content_id"].split(" / ")]
-        active_cids = [cid for cid in cids if active_map.get(cid, False)]
+        remaining = cids[:]
+
+        # Filter by active status
+        active_cids = [cid for cid in remaining if details_map.get(cid, {}).get("active", False)]
         if len(active_cids) == 1:
             results[i]["content_id"] = active_cids[0]
             results[i]["status"] = "Match"
+            continue
+        if active_cids:
+            remaining = active_cids
+
+        # If CSV provided release_year, narrow further
+        meta = parsed_metadata[i] if parsed_metadata else None
+        if meta and meta.get("release_year") and len(remaining) > 1:
+            input_year = meta["release_year"]
+            year_matches = [
+                cid for cid in remaining
+                if details_map.get(cid, {}).get("release_year") == input_year
+            ]
+            if len(year_matches) == 1:
+                results[i]["content_id"] = year_matches[0]
+                results[i]["status"] = "Match"
+                continue
+            if year_matches:
+                remaining = year_matches
+
+        # If CSV provided language, narrow further
+        if meta and meta.get("language") and len(remaining) > 1:
+            input_lang = meta["language"].lower()
+            lang_matches = [
+                cid for cid in remaining
+                if input_lang in details_map.get(cid, {}).get("language", "").lower()
+            ]
+            if len(lang_matches) == 1:
+                results[i]["content_id"] = lang_matches[0]
+                results[i]["status"] = "Match"
+                continue
+            if lang_matches:
+                remaining = lang_matches
+
+        # If narrowed to one, resolve
+        if len(remaining) == 1:
+            results[i]["content_id"] = remaining[0]
+            results[i]["status"] = "Match"
+        elif remaining != cids:
+            results[i]["content_id"] = " / ".join(sorted(set(remaining)))
 
     return results
 
@@ -418,25 +462,79 @@ def match_title(title: str, title_type: str, index: dict) -> dict:
 
 
 def parse_input_lines(text: str) -> list:
-    """Parse input text into list of (title, type) tuples.
+    """Parse input text into list of dicts with title, type, release_year, language.
 
-    Handles multi-column CSVs with quoted fields — always extracts
-    column 1 as title and column 2 as type (if MOVIE/SERIES).
+    Handles multi-column CSVs with quoted fields. Detects columns by header name
+    when present; falls back to positional (col 1 = title, col 2 = type).
     """
     results = []
     reader = csv.reader(io.StringIO(text.strip()))
-    for row in reader:
+    rows_list = list(reader)
+    if not rows_list:
+        return results
+
+    # Try to detect header row and map columns
+    col_map = {}
+    first_row = [c.strip().lower() for c in rows_list[0]]
+    header_keywords = {
+        "title": ["title"],
+        "type": ["type", "prod type", "content type"],
+        "release_year": ["release year", "release_year", "year"],
+        "language": ["original language", "language", "original_language"],
+    }
+    for field, keywords in header_keywords.items():
+        for i, col in enumerate(first_row):
+            if col in keywords:
+                col_map[field] = i
+                break
+
+    has_header = "title" in col_map
+    start_idx = 1 if has_header else 0
+
+    if not has_header:
+        col_map = {"title": 0}
+
+    for row in rows_list[start_idx:]:
         if not row or not row[0].strip():
             continue
-        title = row[0].strip()
-        if title.lower() == "title":
+        title_idx = col_map.get("title", 0)
+        if title_idx >= len(row):
             continue
+        title = row[title_idx].strip()
+        if not title or title.lower() == "title":
+            continue
+
         title_type = ""
-        if len(row) > 1:
-            col2 = row[1].strip().upper()
-            if col2 in ("MOVIE", "SERIES"):
-                title_type = col2
-        results.append((title, title_type))
+        type_idx = col_map.get("type")
+        if type_idx is not None and type_idx < len(row):
+            val = row[type_idx].strip().upper()
+            if val in ("MOVIE", "SERIES"):
+                title_type = val
+            elif val in ("FEATURE", "DTV/FT FGN REL", "DTV/FT US MIN"):
+                title_type = "MOVIE"
+        elif len(row) > 1 and "type" not in col_map:
+            val = row[1].strip().upper()
+            if val in ("MOVIE", "SERIES"):
+                title_type = val
+
+        release_year = ""
+        year_idx = col_map.get("release_year")
+        if year_idx is not None and year_idx < len(row):
+            val = row[year_idx].strip()
+            if re.match(r"^\d{4}$", val):
+                release_year = val
+
+        language = ""
+        lang_idx = col_map.get("language")
+        if lang_idx is not None and lang_idx < len(row):
+            language = row[lang_idx].strip()
+
+        results.append({
+            "title": title,
+            "type": title_type,
+            "release_year": release_year,
+            "language": language,
+        })
     return results
 
 
@@ -487,8 +585,8 @@ def render_content_id_matcher():
                     db_rows = _query_avails(selected_import_id)
                     index = _build_index(db_rows)
                 parsed = parse_input_lines(input_text)
-                results = [match_title(title, ttype, index) for title, ttype in parsed]
-                results = _resolve_multiple_matches(results)
+                results = [match_title(p["title"], p["type"], index) for p in parsed]
+                results = _resolve_multiple_matches(results, parsed)
                 results = _apply_prior_verifications(results, selected_import_id)
                 st.session_state.matcher_results = results
                 st.session_state.verify_index = 0
@@ -603,13 +701,21 @@ def render_content_id_matcher():
                     active = info.get("active", False)
                     active_color = "#059669" if active else "#b3261e"
                     active_label = "Active" if active else "Inactive"
+                    year_str = info.get("release_year", "")
+                    lang_str = info.get("language", "")
+                    meta_parts = []
+                    if year_str:
+                        meta_parts.append(year_str)
+                    if lang_str:
+                        meta_parts.append(lang_str)
+                    meta_display = f' <span style="font-size:11px; color:#8a8199;">({", ".join(meta_parts)})</span>' if meta_parts else ""
 
                     row_col1, row_col2 = st.columns([5, 1])
                     with row_col1:
                         st.markdown(f"""
                         <div style="display:flex; align-items:center; gap:12px; padding:8px 12px; background:#fff; border:1px solid #e7e3ee; border-radius:8px; margin-bottom:4px;">
                             <code style="font-size:14px; font-weight:600; color:#1b1626; user-select:all; cursor:text;">{cid}</code>
-                            <span style="font-size:13px; color:#4b4458;">— {ci_title}</span>
+                            <span style="font-size:13px; color:#4b4458;">— {ci_title}{meta_display}</span>
                             <span style="font-size:12px; font-weight:600; color:{active_color};">{active_label}</span>
                         </div>
                         """, unsafe_allow_html=True)
