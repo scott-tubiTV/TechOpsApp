@@ -369,7 +369,17 @@ def main():
         </div>
         """, unsafe_allow_html=True)
 
+    # Admin: Genie instructions manager
+    if is_admin(user_email):
+        with st.sidebar:
+            if st.button("⚙ Manage Instructions", key="manage_instructions", use_container_width=True):
+                st.session_state.active_tool = "_instructions"
+                st.rerun()
+
     # If a tool is active, render it instead of chat
+    if st.session_state.active_tool == "_instructions" and is_admin(user_email):
+        _render_instructions_manager()
+        return
     if st.session_state.active_tool and has_tool_access(user_email):
         tool_config = TOOLS.get(st.session_state.active_tool)
         if tool_config:
@@ -387,6 +397,56 @@ def main():
         _render_welcome(user_name)
     else:
         _render_chat(prompt, user_email)
+
+
+def _render_instructions_manager():
+    """Admin tool: push instructions to Genie spaces via the SP's credentials."""
+    st.markdown("### Genie Instructions Manager")
+    st.caption("Push instructions directly to Genie spaces using the app's service principal.")
+
+    client = get_genie_client()
+
+    space_name = st.selectbox("Space", list(GENIE_SPACES.keys()))
+    space_id = GENIE_SPACES[space_name]["id"]
+    st.code(f"Space ID: {space_id}", language=None)
+
+    current = ""
+    try:
+        space_data = client.get_space(space_id)
+        serialized = space_data.get("serialized_space", {})
+        if isinstance(serialized, str):
+            import json as _json
+            serialized = _json.loads(serialized) if serialized else {}
+        current = serialized.get("instructions", {}).get("text_instructions", "")
+    except Exception as e:
+        st.warning(f"Could not read current instructions: {e}")
+
+    instructions = st.text_area(
+        "Instructions",
+        value=current,
+        height=400,
+        placeholder="Enter instructions for this Genie space...",
+    )
+
+    if st.button("Push Instructions", type="primary"):
+        try:
+            result = client.set_instructions(space_id, instructions)
+            st.success("Instructions pushed successfully!")
+            serialized_back = result.get("serialized_space", {})
+            if isinstance(serialized_back, str):
+                import json as _json
+                serialized_back = _json.loads(serialized_back) if serialized_back else {}
+            saved = serialized_back.get("instructions", {}).get("text_instructions", "")
+            if saved:
+                st.caption(f"Confirmed: {len(saved)} chars saved")
+            else:
+                st.caption("Note: response didn't confirm instructions (may still have worked)")
+        except Exception as e:
+            st.error(f"Failed: {e}")
+
+    if st.button("← Back to Chat", key="back_from_instructions"):
+        st.session_state.active_tool = None
+        st.rerun()
 
 
 def _render_welcome(user_name):

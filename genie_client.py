@@ -139,6 +139,21 @@ class GenieClient:
             body={"serialized_space": serialized},
         )
 
+    def set_instructions(self, space_id: str, instructions: str) -> dict:
+        """Set text_instructions on a Genie space via serialized_space PATCH."""
+        space = self.get_space(space_id)
+        serialized = space.get("serialized_space", {})
+        if not serialized:
+            serialized = {}
+        if "instructions" not in serialized:
+            serialized["instructions"] = {}
+        serialized["instructions"]["text_instructions"] = instructions
+        return self._do(
+            "PATCH",
+            f"/api/2.0/genie/spaces/{space_id}",
+            body={"serialized_space": serialized},
+        )
+
     def parse_response(self, msg: dict) -> dict:
         """Extract the useful parts from a Genie message response."""
         raw_status = msg.get("status")
