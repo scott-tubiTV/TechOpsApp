@@ -276,8 +276,10 @@ def init_session_state():
 def _ensure_persistence_ready():
     try:
         ensure_table_exists()
-    except Exception:
-        pass
+        return True
+    except Exception as e:
+        st.warning(f"Conversation persistence unavailable: {e}")
+        return False
 
 
 def clear_conversation():
@@ -854,8 +856,8 @@ def _render_chat(prompt=None, user_email=None):
                     conversation_id=st.session_state.argo_conversation_id,
                 )
                 st.session_state.argo_conversation_id = argo_conv_id
-            except Exception:
-                pass
+            except Exception as e:
+                st.toast(f"Save failed: {e}", icon="⚠️")
 
             st.rerun()
 

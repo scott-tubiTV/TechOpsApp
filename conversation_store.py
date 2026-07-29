@@ -48,6 +48,11 @@ def _execute_sql(query):
 
 @st.cache_resource
 def ensure_table_exists():
+    try:
+        _execute_sql(f"SELECT 1 FROM {TABLE} LIMIT 1")
+        return
+    except Exception:
+        pass
     _execute_sql(f"""
         CREATE TABLE IF NOT EXISTS {TABLE} (
             conversation_id  STRING NOT NULL,
