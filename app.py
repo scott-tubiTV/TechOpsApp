@@ -28,13 +28,13 @@ GENIE_SPACES = {
     "Content Metrics": {
         "id": os.environ.get("GENIE_SPACE_TECHOPS", "01f1808d550e12fb9bd0578798518174"),
         "description": "Ops metrics: policy snapshots, avails status, imports, images, partners, QA/ABF, workload, content refresh",
-        "keywords": ["policy", "avail", "import", "image", "partner", "qa", "abf", "workload", "snapshot", "metric", "weekly", "monthly", "refresh", "gate", "published", "curation"],
+        "keywords": ["policy", "avail", "import", "image", "qa", "abf", "workload", "snapshot", "metric", "weekly", "monthly", "refresh", "gate", "published", "curation"],
         "color": "#a855f7",
     },
     "Redeliveries": {
         "id": os.environ.get("GENIE_SPACE_REDELIVERIES", "01f18b7f50db1b3d851f29a3c3d66295"),
         "description": "Redelivery detail: per-title breakdown by reason, modality, age, partner, and dismissal status",
-        "keywords": ["redelivery", "redeliver", "dismissed", "modality", "video file", "subtitle file", "image file", "overdue", "backlog", "oldest", "reason"],
+        "keywords": ["redelivery", "redeliver", "dismissed", "modality", "video file", "subtitle file", "image file", "overdue", "backlog", "oldest", "reason", "partner"],
         "color": "#f59e0b",
     },
     "Dupe Checker V2": {
