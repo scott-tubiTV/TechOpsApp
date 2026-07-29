@@ -141,18 +141,36 @@ class GenieClient:
 
     def set_instructions(self, space_id: str, instructions: str) -> dict:
         """Set text_instructions on a Genie space via serialized_space PATCH."""
+        import json as _json
         space = self.get_space(space_id)
-        serialized = space.get("serialized_space", {})
-        if not serialized:
-            serialized = {}
+        raw = space.get("serialized_space")
+        if isinstance(raw, str) and raw:
+            serialized = _json.loads(raw)
+        elif isinstance(raw, dict):
+            serialized = raw
+        else:
+            serialized = {"version": 2}
         if "instructions" not in serialized:
             serialized["instructions"] = {}
         serialized["instructions"]["text_instructions"] = instructions
-        return self._do(
-            "PATCH",
-            f"/api/2.0/genie/spaces/{space_id}",
-            body={"serialized_space": serialized},
-        )
+        # The SDK serializes the body to JSON — if serialized_space is a dict,
+        # the SDK sends it as a nested object. If it's a string, it sends as a string.
+        # Try both approaches.
+        try:
+            return self._do(
+                "PATCH",
+                f"/api/2.0/genie/spaces/{space_id}",
+                body={"serialized_space": serialized},
+            )
+        except Exception as e1:
+            try:
+                return self._do(
+                    "PATCH",
+                    f"/api/2.0/genie/spaces/{space_id}",
+                    body={"serialized_space": _json.dumps(serialized)},
+                )
+            except Exception as e2:
+                raise Exception(f"Both formats failed. Object: {e1} | String: {e2}")
 
     def parse_response(self, msg: dict) -> dict:
         """Extract the useful parts from a Genie message response."""
