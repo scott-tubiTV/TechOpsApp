@@ -9,8 +9,8 @@ command:
 
 env:
   - name: GENIE_SPACE_TECHOPS
-    value: "01f1808d550e12fb9bd0578798518174"
+    value: "01f18b97de0117d8af61d23c1eaa8d7e"
   - name: GENIE_SPACE_REDELIVERIES
-    value: "01f18b7f50db1b3d851f29a3c3d66295"
+    value: "01f18b97de2f122eb27a1b307d68e50e"
   - name: GENIE_SPACE_DUPE_CHECKER
     value: "01f122f4e2921b7a9c28ef03d0812ee6"
