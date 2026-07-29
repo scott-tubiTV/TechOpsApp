@@ -4,6 +4,14 @@ import os
 import pandas as pd
 import streamlit as st
 from genie_client import GenieClient
+from conversation_store import (
+    ensure_table_exists,
+    save_conversation,
+    list_conversations,
+    load_conversation,
+    share_conversation,
+    archive_conversation,
+)
 from tools.sony_matcher import render_content_id_matcher
 
 ADMIN_EMAILS = [
@@ -260,19 +268,42 @@ def init_session_state():
         st.session_state.auto_route = True
     if "active_tool" not in st.session_state:
         st.session_state.active_tool = None
+    if "argo_conversation_id" not in st.session_state:
+        st.session_state.argo_conversation_id = None
+
+
+@st.cache_resource
+def _ensure_persistence_ready():
+    try:
+        ensure_table_exists()
+    except Exception:
+        pass
 
 
 def clear_conversation():
     st.session_state.messages = []
     st.session_state.conversation_id = None
+    st.session_state.argo_conversation_id = None
 
 
 def send_suggestion(text):
     st.session_state._pending_suggestion = text
 
 
+def _load_past_conversation(conversation_id, user_email):
+    conv = load_conversation(conversation_id, requesting_email=user_email)
+    if conv is None:
+        return
+    st.session_state.messages = conv["messages"]
+    st.session_state.argo_conversation_id = conv["conversation_id"]
+    st.session_state.active_space = conv.get("space_name") or list(GENIE_SPACES.keys())[0]
+    st.session_state.conversation_id = None
+    st.session_state.active_tool = None
+
+
 def main():
     init_session_state()
+    _ensure_persistence_ready()
     user_email = get_user_email()
     user_name = get_user_display_name(user_email)
     user_initials = get_user_initials(user_email)
@@ -289,6 +320,45 @@ def main():
         if st.button("+ New query", use_container_width=True, type="primary"):
             clear_conversation()
             st.rerun()
+
+        st.divider()
+
+        # Conversation history
+        st.markdown("""
+        <div style="font-size:10.5px; font-weight:700; letter-spacing:0.13em; color:#9990a8; text-transform:uppercase; padding:0 0 6px;">
+            Recent
+        </div>
+        """, unsafe_allow_html=True)
+
+        conv_search = st.text_input(
+            "Search conversations",
+            key="conv_search",
+            placeholder="Search...",
+            label_visibility="collapsed",
+        )
+
+        try:
+            conversations = list_conversations(user_email, search=conv_search)
+        except Exception:
+            conversations = []
+
+        if conversations:
+            for conv in conversations:
+                is_current = (st.session_state.argo_conversation_id == conv["conversation_id"])
+                label = conv["title"] or "Untitled"
+                if conv.get("shared_with") and conv.get("user_email") != user_email:
+                    label = f"[Shared] {label}"
+                btn_type = "primary" if is_current else "secondary"
+                if st.button(
+                    label,
+                    key=f"conv_{conv['conversation_id']}",
+                    use_container_width=True,
+                    type=btn_type,
+                ):
+                    _load_past_conversation(conv["conversation_id"], user_email)
+                    st.rerun()
+        elif not conv_search:
+            st.caption("No conversations yet.")
 
         st.divider()
 
@@ -482,15 +552,26 @@ def _render_welcome(user_name):
 
 def _render_chat(prompt=None, user_email=None):
     """Render the chat conversation view."""
-    # Status bar
-    st.markdown(f"""
-    <div style="display:flex; align-items:center; justify-content:flex-end; padding:0 0 12px; border-bottom:1px solid #eceaf2; margin-bottom:16px;">
-        <div class="status-indicator">
-            <span class="status-dot"></span>
-            Auto-routing {'on' if st.session_state.auto_route else 'off'}
+    # Status bar with share button
+    bar_col1, bar_col2 = st.columns([8, 1])
+    with bar_col1:
+        st.markdown(f"""
+        <div style="display:flex; align-items:center; padding:0 0 12px; border-bottom:1px solid #eceaf2; margin-bottom:16px;">
+            <div class="status-indicator">
+                <span class="status-dot"></span>
+                Auto-routing {'on' if st.session_state.auto_route else 'off'}
+            </div>
         </div>
-    </div>
-    """, unsafe_allow_html=True)
+        """, unsafe_allow_html=True)
+    with bar_col2:
+        if st.session_state.argo_conversation_id and not is_admin(user_email):
+            if st.button("Share", key="share_admin", help="Share this conversation with an admin for debugging"):
+                try:
+                    for admin_email in ADMIN_EMAILS:
+                        share_conversation(st.session_state.argo_conversation_id, admin_email)
+                    st.toast("Shared with admin!")
+                except Exception:
+                    st.toast("Failed to share", icon="⚠️")
 
     # Render message history
     for i, msg in enumerate(st.session_state.messages):
@@ -764,6 +845,18 @@ def _render_chat(prompt=None, user_email=None):
                 assistant_msg = {"role": "assistant", "content": error_text}
 
             st.session_state.messages.append(assistant_msg)
+
+            try:
+                argo_conv_id = save_conversation(
+                    user_email=user_email,
+                    messages=st.session_state.messages,
+                    space_name=st.session_state.active_space,
+                    conversation_id=st.session_state.argo_conversation_id,
+                )
+                st.session_state.argo_conversation_id = argo_conv_id
+            except Exception:
+                pass
+
             st.rerun()
 
 
