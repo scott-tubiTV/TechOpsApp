@@ -13,6 +13,7 @@ from conversation_store import (
     archive_conversation,
 )
 from tools.sony_matcher import render_content_id_matcher
+from tools.imdb_dupe_checker import render_imdb_dupe_checker
 
 ADMIN_EMAILS = [
     "swhitney@tubi.tv",
@@ -29,6 +30,11 @@ TOOLS = {
         "icon": "🔍",
         "description": "Look up Tubi content IDs by title from the live database",
         "renderer": render_content_id_matcher,
+    },
+    "IMDB Dupe Checker": {
+        "icon": "🎬",
+        "description": "Find IMDB IDs, detect duplicates, and check policy conflicts",
+        "renderer": render_imdb_dupe_checker,
     },
 }
 
