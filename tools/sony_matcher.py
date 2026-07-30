@@ -574,9 +574,13 @@ def render_content_id_matcher():
             key="matcher_input",
         )
     with col_upload:
-        uploaded = st.file_uploader("Or upload CSV/TXT", type=["csv", "txt"], key="matcher_file")
+        uploaded = st.file_uploader("Or upload CSV/Excel", type=["csv", "txt", "xlsx", "xls"], key="matcher_file")
         if uploaded:
-            input_text = uploaded.read().decode("utf-8")
+            if uploaded.name.endswith((".xlsx", ".xls")):
+                df = pd.read_excel(uploaded, dtype=str, engine="openpyxl")
+                input_text = df.to_csv(index=False)
+            else:
+                input_text = uploaded.read().decode("utf-8")
 
     if st.button("Match Titles", type="primary", key="matcher_btn"):
         if input_text and input_text.strip():

@@ -127,6 +127,27 @@ def parse_csv_input(text):
     return results
 
 
+def _parse_excel_to_csv(uploaded_file):
+    """Read an Excel file and convert to CSV text for parse_csv_input."""
+    df = pd.read_excel(uploaded_file, dtype=str, engine="openpyxl")
+    df.columns = [c.strip().lower() for c in df.columns]
+
+    # Map common Excel column names to our expected headers
+    col_renames = {}
+    for col in df.columns:
+        if col in ("title", "name", "content_name", "movie title", "series title"):
+            col_renames[col] = "title"
+        elif col in ("type", "prod type", "content type", "content_type"):
+            col_renames[col] = "type"
+        elif col in ("release year", "release_year", "year"):
+            col_renames[col] = "year"
+        elif col in ("director", "directors"):
+            col_renames[col] = "director"
+    df = df.rename(columns=col_renames)
+
+    return df.to_csv(index=False)
+
+
 def _find_duplicates(imdb_ids, sql_client, config):
     """Check if IMDB IDs already exist in backend under different content_ids."""
     if not imdb_ids:
@@ -251,9 +272,12 @@ def render_imdb_dupe_checker():
             key="dupe_input",
         )
     with col_upload:
-        uploaded = st.file_uploader("Or upload CSV", type=["csv", "txt"], key="dupe_file")
+        uploaded = st.file_uploader("Or upload CSV/Excel", type=["csv", "txt", "xlsx", "xls"], key="dupe_file")
         if uploaded:
-            input_text = uploaded.read().decode("utf-8")
+            if uploaded.name.endswith((".xlsx", ".xls")):
+                input_text = _parse_excel_to_csv(uploaded)
+            else:
+                input_text = uploaded.read().decode("utf-8")
 
     if st.button("Run Dupe Check", type="primary", key="dupe_btn"):
         if not input_text or not input_text.strip():
