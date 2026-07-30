@@ -3,17 +3,27 @@
 import csv
 import io
 import re
-import unicodedata
+from datetime import datetime, timezone
 
 import pandas as pd
 import streamlit as st
 from databricks.sdk import WorkspaceClient
 
-CONTENT_INFO = "core_prod.tubidw.content_info"
-RICH_CONTENT = "ml_prod.common.rich_content"
-IMDB_CATALOG = "core_prod.imdb.imdb_title_essential_v2"
+from imdb_engine import (
+    IMDBEngineConfig,
+    IMDBMatcher,
+    IMDBVerifier,
+    MatchRequest,
+    MatchResult,
+    SQLClient,
+    VerificationRecord,
+    Confidence,
+)
+from imdb_engine.normalizer import escape_sql
+
 POLICY_WINDOWS = "core_prod.policydb_cdc.content_policy_windows"
-WAREHOUSE_ID = "a6b9541289d75c6e"
+RICH_CONTENT = "ml_prod.common.rich_content"
+CONTENT_INFO = "core_prod.tubidw.content_info"
 
 
 @st.cache_resource
@@ -21,65 +31,37 @@ def _get_workspace_client():
     return WorkspaceClient()
 
 
-def _execute_sql(query):
-    import time
-
+@st.cache_resource
+def _get_engine():
     w = _get_workspace_client()
-    result = w.api_client.do(
-        "POST",
-        "/api/2.0/sql/statements",
-        body={
-            "statement": query,
-            "warehouse_id": WAREHOUSE_ID,
-            "wait_timeout": "50s",
-        },
-    )
-    status = result.get("status", {}).get("state")
-    if status in ("PENDING", "RUNNING"):
-        stmt_id = result.get("statement_id")
-        for _ in range(30):
-            time.sleep(2)
-            result = w.api_client.do("GET", f"/api/2.0/sql/statements/{stmt_id}")
-            status = result.get("status", {}).get("state")
-            if status not in ("PENDING", "RUNNING"):
-                break
-    if status != "SUCCEEDED":
-        error = result.get("status", {}).get("error", {}).get("message", "Unknown error")
-        raise RuntimeError(f"Query failed: {error}")
-    columns = [c["name"] for c in result.get("manifest", {}).get("schema", {}).get("columns", [])]
-    rows = result.get("result", {}).get("data_array", [])
-    return [dict(zip(columns, row)) for row in rows]
+    config = IMDBEngineConfig()
+    sql = SQLClient(workspace_client=w, config=config)
+    matcher = IMDBMatcher(config=config, sql_client=sql)
+    verifier = IMDBVerifier(sql_client=sql, config=config)
+    try:
+        verifier.ensure_table_exists()
+    except Exception:
+        pass
+    return matcher, verifier, sql, config
 
 
-def _normalize(text):
-    if not text:
-        return ""
-    text = unicodedata.normalize("NFKC", text)
-    text = text.lower()
-    text = re.sub(r"[^a-z0-9\s]", "", text)
-    text = re.sub(r"\s+", " ", text).strip()
-    return text
-
-
-def _normalize_no_article(text):
-    norm = _normalize(text)
-    for article in ("the ", "a ", "an "):
-        if norm.startswith(article):
-            return norm[len(article):]
-    for article in (" the", " a", " an"):
-        if norm.endswith(article):
-            return norm[: -len(article)]
-    return norm
-
-
-def _escape(val):
-    if val is None:
-        return "NULL"
-    return str(val).replace("\\", "\\\\").replace("'", "''")
+def _get_user_email():
+    try:
+        user_info = st.experimental_user
+        if user_info and user_info.get("email"):
+            return user_info["email"]
+    except Exception:
+        pass
+    headers = st.context.headers
+    for h in ["X-Forwarded-Email", "X-Forwarded-Preferred-Username", "X-Databricks-User-Email"]:
+        val = headers.get(h)
+        if val:
+            return val
+    return "unknown"
 
 
 def parse_csv_input(text):
-    """Parse CSV input into list of dicts with title, type, release_year."""
+    """Parse CSV input into list of MatchRequests."""
     results = []
     reader = csv.reader(io.StringIO(text.strip()))
     rows_list = list(reader)
@@ -92,6 +74,7 @@ def parse_csv_input(text):
         "title": ["title", "name", "content_name"],
         "type": ["type", "prod type", "content type", "content_type"],
         "release_year": ["release year", "release_year", "year"],
+        "director": ["director"],
     }
     for field, keywords in header_keywords.items():
         for i, col in enumerate(first_row):
@@ -114,14 +97,14 @@ def parse_csv_input(text):
         if not title or title.lower() == "title":
             continue
 
-        title_type = ""
+        content_type = ""
         type_idx = col_map.get("type")
         if type_idx is not None and type_idx < len(row):
             val = row[type_idx].strip().upper()
             if val in ("MOVIE", "SERIES"):
-                title_type = val
+                content_type = val
             elif val in ("FEATURE", "DTV/FT FGN REL", "DTV/FT US MIN"):
-                title_type = "MOVIE"
+                content_type = "MOVIE"
 
         release_year = ""
         year_idx = col_map.get("release_year")
@@ -130,205 +113,26 @@ def parse_csv_input(text):
             if re.match(r"^\d{4}$", val):
                 release_year = val
 
-        results.append({"title": title, "type": title_type, "release_year": release_year})
+        director = ""
+        dir_idx = col_map.get("director")
+        if dir_idx is not None and dir_idx < len(row):
+            director = row[dir_idx].strip()
+
+        results.append(MatchRequest(
+            title=title,
+            content_type=content_type,
+            release_year=release_year,
+            director=director,
+        ))
     return results
 
 
-def _step1_match_content_ids(titles):
-    """Match titles against content_info to find content_ids.
-
-    Returns list of dicts with original fields + content_id, ci_title, ci_year, match_quality.
-    """
-    if not titles:
-        return []
-
-    title_values = []
-    for t in titles:
-        norm = _normalize(t["title"])
-        norm_no_art = _normalize_no_article(t["title"])
-        title_values.append(f"('{_escape(t['title'])}', '{_escape(norm)}', '{_escape(norm_no_art)}', '{_escape(t['type'])}', '{_escape(t['release_year'])}')")
-
-    values_sql = ",\n".join(title_values)
-
-    rows = _execute_sql(f"""
-        WITH input_titles AS (
-            SELECT col1 AS original_title, col2 AS norm_title, col3 AS norm_no_article, col4 AS content_type, col5 AS release_year
-            FROM (VALUES {values_sql}) AS t(col1, col2, col3, col4, col5)
-        ),
-        ci_normalized AS (
-            SELECT
-                content_id,
-                title,
-                content_type,
-                release_year,
-                active,
-                LOWER(TRIM(REGEXP_REPLACE(REGEXP_REPLACE(title, '[^a-zA-Z0-9\\\\s]', ''), '\\\\s+', ' '))) AS norm_title,
-                LOWER(TRIM(REGEXP_REPLACE(REGEXP_REPLACE(
-                    REGEXP_REPLACE(title, '(?i)^(the|a|an)\\\\s+', ''),
-                    '[^a-zA-Z0-9\\\\s]', ''), '\\\\s+', ' '))) AS norm_no_article
-            FROM {CONTENT_INFO}
-            WHERE active = true
-              AND content_type IN ('MOVIE', 'SERIES')
-        )
-        SELECT
-            it.original_title,
-            it.content_type AS input_type,
-            it.release_year AS input_year,
-            ci.content_id,
-            ci.title AS ci_title,
-            ci.content_type AS ci_type,
-            ci.release_year AS ci_year,
-            CASE
-                WHEN it.norm_title = ci.norm_title THEN 'exact'
-                WHEN it.norm_no_article = ci.norm_no_article THEN 'no_article'
-                ELSE 'fuzzy'
-            END AS match_quality
-        FROM input_titles it
-        JOIN ci_normalized ci
-            ON (it.norm_title = ci.norm_title OR it.norm_no_article = ci.norm_no_article)
-        WHERE (it.content_type = '' OR it.content_type = ci.content_type)
-          AND (it.release_year = '' OR it.release_year = CAST(ci.release_year AS STRING)
-               OR ABS(CAST(it.release_year AS INT) - ci.release_year) <= 1)
-    """)
-    return rows
-
-
-def _step2_imdb_from_content_ids(content_ids):
-    """Look up IMDB IDs via rich_content for resolved content_ids."""
-    if not content_ids:
-        return {}
-    id_list = ", ".join(f"'{cid}'" for cid in content_ids)
-    rows = _execute_sql(f"""
-        SELECT tubi_video_id AS content_id, imdb_id
-        FROM {RICH_CONTENT}
-        WHERE tubi_video_id IN ({id_list})
-          AND imdb_id IS NOT NULL
-          AND imdb_id != ''
-    """)
-    return {r["content_id"]: r["imdb_id"] for r in rows}
-
-
-def _step3_fuzzy_imdb_match(titles):
-    """Fuzzy match titles directly against IMDB catalog.
-
-    Returns list of dicts with original_title, imdb_id, imdb_title, imdb_year, confidence.
-    """
-    if not titles:
-        return []
-
-    title_values = []
-    for t in titles:
-        norm = _normalize(t["title"])
-        norm_no_art = _normalize_no_article(t["title"])
-        title_values.append(f"('{_escape(t['title'])}', '{_escape(norm)}', '{_escape(norm_no_art)}', '{_escape(t['type'])}', '{_escape(t['release_year'])}')")
-
-    values_sql = ",\n".join(title_values)
-
-    rows = _execute_sql(f"""
-        WITH input_titles AS (
-            SELECT col1 AS original_title, col2 AS norm_title, col3 AS norm_no_article, col4 AS content_type, col5 AS release_year
-            FROM (VALUES {values_sql}) AS t(col1, col2, col3, col4, col5)
-        ),
-        imdb_norm AS (
-            SELECT
-                titleId AS imdb_id,
-                originalTitle,
-                year AS imdb_year,
-                titleType,
-                CASE
-                    WHEN titleType IN ('movie', 'tvMovie', 'video') THEN 'MOVIE'
-                    WHEN titleType IN ('tvSeries', 'tvMiniSeries') THEN 'SERIES'
-                END AS mapped_type,
-                LOWER(TRIM(REGEXP_REPLACE(REGEXP_REPLACE(originalTitle, '[^a-zA-Z0-9\\\\s]', ''), '\\\\s+', ' '))) AS norm_title,
-                LOWER(TRIM(REGEXP_REPLACE(REGEXP_REPLACE(
-                    REGEXP_REPLACE(originalTitle, '(?i)^(the|a|an)\\\\s+', ''),
-                    '[^a-zA-Z0-9\\\\s]', ''), '\\\\s+', ' '))) AS norm_no_article
-            FROM {IMDB_CATALOG}
-            WHERE titleType IN ('movie', 'tvMovie', 'video', 'tvSeries', 'tvMiniSeries')
-        ),
-        matched AS (
-            SELECT
-                it.original_title,
-                it.release_year AS input_year,
-                it.content_type AS input_type,
-                imdb.imdb_id,
-                imdb.originalTitle AS imdb_title,
-                imdb.imdb_year,
-                imdb.titleType AS imdb_type,
-                CASE
-                    WHEN it.norm_title = imdb.norm_title THEN 'exact'
-                    WHEN it.norm_no_article = imdb.norm_no_article THEN 'no_article'
-                    ELSE 'other'
-                END AS title_match,
-                CASE
-                    WHEN it.release_year != '' AND imdb.imdb_year IS NOT NULL
-                         AND CAST(it.release_year AS INT) = imdb.imdb_year THEN 'exact_year'
-                    WHEN it.release_year != '' AND imdb.imdb_year IS NOT NULL
-                         AND ABS(CAST(it.release_year AS INT) - imdb.imdb_year) <= 1 THEN 'year_off_by_1'
-                    WHEN it.release_year = '' OR imdb.imdb_year IS NULL THEN 'year_missing'
-                    ELSE 'year_mismatch'
-                END AS year_match
-            FROM input_titles it
-            JOIN imdb_norm imdb
-                ON (it.norm_title = imdb.norm_title OR it.norm_no_article = imdb.norm_no_article)
-            WHERE (it.content_type = '' OR it.content_type = imdb.mapped_type)
-              AND NOT (
-                  it.release_year != '' AND imdb.imdb_year IS NOT NULL
-                  AND ABS(CAST(it.release_year AS INT) - imdb.imdb_year) > 1
-              )
-        ),
-        candidate_counts AS (
-            SELECT original_title, COUNT(DISTINCT imdb_id) AS num_candidates
-            FROM matched
-            GROUP BY original_title
-        ),
-        ranked AS (
-            SELECT
-                m.*,
-                cc.num_candidates,
-                ROW_NUMBER() OVER (
-                    PARTITION BY m.original_title
-                    ORDER BY
-                        CASE WHEN m.year_match = 'exact_year' THEN 0
-                             WHEN m.year_match = 'year_off_by_1' THEN 1
-                             WHEN m.year_match = 'year_missing' THEN 2
-                             ELSE 3 END,
-                        CASE WHEN m.title_match = 'exact' THEN 0 ELSE 1 END
-                ) AS rn
-            FROM matched m
-            JOIN candidate_counts cc ON m.original_title = cc.original_title
-        )
-        SELECT
-            original_title,
-            input_year,
-            input_type,
-            imdb_id,
-            imdb_title,
-            imdb_year,
-            imdb_type,
-            title_match,
-            year_match,
-            num_candidates,
-            CASE
-                WHEN num_candidates = 1 AND year_match = 'exact_year' AND title_match = 'exact' THEN 'HIGH'
-                WHEN num_candidates = 1 AND year_match IN ('exact_year', 'year_off_by_1') THEN 'HIGH'
-                WHEN num_candidates = 1 AND year_match = 'year_missing' AND title_match = 'exact' THEN 'MEDIUM'
-                WHEN num_candidates = 1 THEN 'MEDIUM'
-                WHEN num_candidates <= 3 AND year_match = 'exact_year' THEN 'MEDIUM'
-                ELSE 'LOW'
-            END AS confidence
-        FROM ranked
-        WHERE rn = 1
-    """)
-    return rows
-
-
-def _step4_find_duplicates(imdb_ids):
-    """Check if any IMDB IDs already exist in the backend under different content_ids."""
+def _find_duplicates(imdb_ids, sql_client, config):
+    """Check if IMDB IDs already exist in backend under different content_ids."""
     if not imdb_ids:
         return {}
-    id_list = ", ".join(f"'{_escape(iid)}'" for iid in imdb_ids)
-    rows = _execute_sql(f"""
+    id_list = ", ".join(f"'{escape_sql(iid)}'" for iid in imdb_ids)
+    rows = sql_client.execute(f"""
         SELECT
             rc.imdb_id,
             rc.tubi_video_id AS existing_content_id,
@@ -336,8 +140,8 @@ def _step4_find_duplicates(imdb_ids):
             ci.active,
             ci.content_type,
             ci.import_id
-        FROM {RICH_CONTENT} rc
-        JOIN {CONTENT_INFO} ci ON ci.content_id = rc.tubi_video_id
+        FROM {config.rich_content_table} rc
+        JOIN {config.content_info_table} ci ON ci.content_id = rc.tubi_video_id
         WHERE rc.imdb_id IN ({id_list})
           AND rc.tubi_video_id IS NOT NULL
     """)
@@ -347,18 +151,18 @@ def _step4_find_duplicates(imdb_ids):
     return dupes
 
 
-def _step5_check_policy_conflicts(content_ids):
+def _check_policy_conflicts(content_ids, sql_client, config):
     """Check for active policy windows on content_ids."""
     if not content_ids:
         return {}
-    id_list = ", ".join(f"'{cid}'" for cid in content_ids)
-    rows = _execute_sql(f"""
+    id_list = ", ".join(f"'{escape_sql(cid)}'" for cid in content_ids)
+    rows = sql_client.execute(f"""
         SELECT
             CAST(content_id AS STRING) AS content_id,
             timespan,
             country_list,
             deal_id
-        FROM {POLICY_WINDOWS}
+        FROM {config.policy_windows_table}
         WHERE CAST(content_id AS STRING) IN ({id_list})
           AND UPPER(timespan) > CAST(current_timestamp() AS STRING)
     """)
@@ -368,75 +172,19 @@ def _step5_check_policy_conflicts(content_ids):
     return policies
 
 
-def _run_pipeline(titles, progress_callback=None):
-    """Run the full dupe-check pipeline. Returns combined results."""
-    results = []
-
-    if progress_callback:
-        progress_callback("Step 1/5: Matching titles to content IDs...")
-
-    # Step 1: Match content_ids from content_info
-    ci_matches = _step1_match_content_ids(titles)
-
-    # Build lookup: original_title -> best content_id match
-    ci_lookup = {}
-    for row in ci_matches:
-        key = row["original_title"]
-        if key not in ci_lookup or row["match_quality"] == "exact":
-            ci_lookup[key] = row
-
-    if progress_callback:
-        progress_callback("Step 2/5: Looking up IMDB IDs via rich_content...")
-
-    # Step 2: Get IMDB IDs from rich_content for matched content_ids
-    matched_cids = [r["content_id"] for r in ci_lookup.values()]
-    imdb_from_rc = _step2_imdb_from_content_ids(matched_cids)
-
-    if progress_callback:
-        progress_callback("Step 3/5: Fuzzy matching against IMDB catalog...")
-
-    # Step 3: Fuzzy match ALL titles against IMDB catalog (tandem approach)
-    imdb_fuzzy = _step3_fuzzy_imdb_match(titles)
-    imdb_fuzzy_lookup = {}
-    for row in imdb_fuzzy:
-        imdb_fuzzy_lookup[row["original_title"]] = row
-
-    if progress_callback:
-        progress_callback("Step 4/5: Checking for duplicates...")
-
-    # Collect all recovered IMDB IDs for dupe detection
-    all_imdb_ids = set()
-    for iid in imdb_from_rc.values():
-        all_imdb_ids.add(iid)
-    for row in imdb_fuzzy:
-        all_imdb_ids.add(row["imdb_id"])
-
-    dupes = _step4_find_duplicates(list(all_imdb_ids))
-
-    if progress_callback:
-        progress_callback("Step 5/5: Checking policy conflicts...")
-
-    # Collect content_ids from dupes for policy check
-    dupe_cids = set()
-    for dupe_list in dupes.values():
-        for d in dupe_list:
-            dupe_cids.add(d["existing_content_id"])
-    policies = _step5_check_policy_conflicts(list(dupe_cids))
-
-    if progress_callback:
-        progress_callback("Building results...")
-
-    # Combine into final results
-    for t in titles:
+def _build_display_results(requests, match_results, dupes, policies):
+    """Combine match results with dupe/policy info into display rows."""
+    rows = []
+    for req, result in zip(requests, match_results):
         row = {
-            "title": t["title"],
-            "type": t["type"],
-            "release_year": t["release_year"],
-            "content_id": "",
-            "content_id_match": "",
-            "imdb_id": "",
-            "imdb_source": "",
-            "imdb_confidence": "",
+            "title": req.title,
+            "type": req.content_type,
+            "release_year": req.release_year,
+            "content_id": result.content_id or "",
+            "imdb_id": result.imdb_id or "",
+            "imdb_title": result.imdb_title or "",
+            "confidence": result.confidence.value,
+            "match_method": result.match_method.value,
             "is_duplicate": False,
             "duplicate_content_id": "",
             "duplicate_title": "",
@@ -446,58 +194,29 @@ def _run_pipeline(titles, progress_callback=None):
             "policy_details": "",
         }
 
-        # Content ID from step 1
-        ci = ci_lookup.get(t["title"])
-        if ci:
-            row["content_id"] = ci["content_id"]
-            row["content_id_match"] = ci["match_quality"]
-
-        # IMDB ID - prefer rich_content (direct), fall back to fuzzy
-        imdb_id = None
-        if ci and ci["content_id"] in imdb_from_rc:
-            imdb_id = imdb_from_rc[ci["content_id"]]
-            row["imdb_id"] = imdb_id
-            row["imdb_source"] = "rich_content"
-            row["imdb_confidence"] = "HIGH"
-        elif t["title"] in imdb_fuzzy_lookup:
-            fuzzy = imdb_fuzzy_lookup[t["title"]]
-            imdb_id = fuzzy["imdb_id"]
-            row["imdb_id"] = imdb_id
-            row["imdb_source"] = "imdb_catalog"
-            row["imdb_confidence"] = fuzzy["confidence"]
-
-        # Cross-validation: if both paths found IMDB IDs, check agreement
-        if ci and ci["content_id"] in imdb_from_rc and t["title"] in imdb_fuzzy_lookup:
-            rc_imdb = imdb_from_rc[ci["content_id"]]
-            fuzzy_imdb = imdb_fuzzy_lookup[t["title"]]["imdb_id"]
-            if rc_imdb == fuzzy_imdb:
-                row["imdb_confidence"] = "HIGH (cross-validated)"
-            elif rc_imdb != fuzzy_imdb:
-                row["imdb_confidence"] = "CONFLICT"
-                row["imdb_id"] = f"{rc_imdb} vs {fuzzy_imdb}"
+        # Handle CONFLICT display
+        if result.confidence == Confidence.CONFLICT and result.alternate_imdb_id:
+            row["imdb_id"] = f"{result.imdb_id} vs {result.alternate_imdb_id}"
 
         # Dupe detection
+        imdb_id = result.imdb_id
         if imdb_id and imdb_id in dupes:
-            dupe_list = dupes[imdb_id]
-            # Filter out self (same content_id)
-            other_dupes = [d for d in dupe_list if d["existing_content_id"] != row["content_id"]]
+            other_dupes = [d for d in dupes[imdb_id] if d["existing_content_id"] != result.content_id]
             if other_dupes:
                 row["is_duplicate"] = True
-                best_dupe = next((d for d in other_dupes if str(d.get("active", "")).lower() == "true"), other_dupes[0])
-                row["duplicate_content_id"] = best_dupe["existing_content_id"]
-                row["duplicate_title"] = best_dupe.get("existing_title", "")
-                row["duplicate_active"] = str(best_dupe.get("active", "")).lower() == "true"
-                row["duplicate_import_id"] = best_dupe.get("import_id", "")
+                best = next((d for d in other_dupes if str(d.get("active", "")).lower() == "true"), other_dupes[0])
+                row["duplicate_content_id"] = best["existing_content_id"]
+                row["duplicate_title"] = best.get("existing_title", "")
+                row["duplicate_active"] = str(best.get("active", "")).lower() == "true"
+                row["duplicate_import_id"] = best.get("import_id", "")
 
-                # Policy conflict on the duplicate
-                if best_dupe["existing_content_id"] in policies:
+                if best["existing_content_id"] in policies:
                     row["has_policy_conflict"] = True
-                    windows = policies[best_dupe["existing_content_id"]]
+                    windows = policies[best["existing_content_id"]]
                     row["policy_details"] = f"{len(windows)} active window(s): {windows[0].get('country_list', '')}"
 
-        results.append(row)
-
-    return results
+        rows.append(row)
+    return rows
 
 
 def render_imdb_dupe_checker():
@@ -516,8 +235,9 @@ def render_imdb_dupe_checker():
     st.markdown("""
     <div style="background:#f8f7fa; border:1px solid #e7e3ee; border-radius:8px; padding:12px 16px; margin:8px 0 16px;">
         <div style="font-size:12px; color:#6b5f7a; line-height:1.6;">
-            <strong>Pipeline:</strong> CSV → Content ID match → IMDB lookup (rich_content + catalog fuzzy) → Duplicate detection → Policy conflict check<br>
-            <strong>CSV format:</strong> Title, Type (MOVIE/SERIES), Year — header row optional
+            <strong>Pipeline:</strong> Verified matches → Content ID lookup → IMDB catalog match → Cross-validation → Duplicate detection → Policy conflicts<br>
+            <strong>CSV format:</strong> Title, Type (MOVIE/SERIES), Year, Director (optional) — header row optional<br>
+            <strong>Learning:</strong> Verified matches are remembered and auto-resolve on future runs
         </div>
     </div>
     """, unsafe_allow_html=True)
@@ -540,117 +260,237 @@ def render_imdb_dupe_checker():
             st.warning("Paste or upload titles first.")
             return
 
-        titles = parse_csv_input(input_text)
-        if not titles:
+        requests = parse_csv_input(input_text)
+        if not requests:
             st.warning("No valid titles found in input.")
             return
 
         progress = st.empty()
-
-        def update_progress(msg):
-            progress.info(msg)
-
         try:
-            results = _run_pipeline(titles, progress_callback=update_progress)
+            matcher, verifier, sql_client, config = _get_engine()
+
+            # Run the matching engine
+            match_results = matcher.match(requests, progress_callback=lambda msg: progress.info(msg))
+
+            # Collect IMDB IDs for dupe detection
+            progress.info("Checking for duplicates...")
+            imdb_ids = [r.imdb_id for r in match_results if r.imdb_id and "vs" not in r.imdb_id]
+            dupes = _find_duplicates(list(set(imdb_ids)), sql_client, config)
+
+            # Policy conflicts on duplicate content_ids
+            progress.info("Checking policy conflicts...")
+            dupe_cids = set()
+            for dupe_list in dupes.values():
+                for d in dupe_list:
+                    dupe_cids.add(d["existing_content_id"])
+            policies = _check_policy_conflicts(list(dupe_cids), sql_client, config)
+
             progress.empty()
-            st.session_state.dupe_results = results
+
+            # Build display results
+            display_rows = _build_display_results(requests, match_results, dupes, policies)
+            st.session_state.dupe_results = display_rows
+            st.session_state.dupe_match_results = match_results
+            st.session_state.dupe_requests = requests
+            st.session_state.dupe_verify_decisions = {}
+
         except Exception as e:
             progress.empty()
             st.error(f"Pipeline failed: {e}")
             return
 
-    if "dupe_results" in st.session_state and st.session_state.dupe_results:
-        results = st.session_state.dupe_results
+    if "dupe_results" not in st.session_state or not st.session_state.dupe_results:
+        return
 
-        # Summary metrics
-        total = len(results)
-        matched_imdb = len([r for r in results if r["imdb_id"] and "vs" not in r["imdb_id"]])
-        duplicates = len([r for r in results if r["is_duplicate"]])
-        conflicts = len([r for r in results if r["has_policy_conflict"]])
-        no_match = len([r for r in results if not r["imdb_id"]])
+    results = st.session_state.dupe_results
+    match_results = st.session_state.get("dupe_match_results", [])
+    requests = st.session_state.get("dupe_requests", [])
 
-        cols = st.columns(5)
-        cols[0].metric("Total", total)
-        cols[1].metric("IMDB Matched", matched_imdb)
-        cols[2].metric("Duplicates", duplicates)
-        cols[3].metric("Policy Conflicts", conflicts)
-        cols[4].metric("No IMDB Match", no_match)
+    # Summary metrics
+    total = len(results)
+    matched_imdb = len([r for r in results if r["imdb_id"] and "vs" not in r["imdb_id"]])
+    verified = len([r for r in results if r["confidence"] == "VERIFIED"])
+    duplicates = len([r for r in results if r["is_duplicate"]])
+    conflicts = len([r for r in results if r["has_policy_conflict"]])
+    needs_review = len([r for r in results if r["confidence"] in ("LOW", "MEDIUM", "CONFLICT")])
 
-        # Tabs for different views
-        tab_all, tab_dupes, tab_conflicts, tab_unmatched = st.tabs(
-            ["All Results", f"Duplicates ({duplicates})", f"Policy Conflicts ({conflicts})", f"No Match ({no_match})"]
-        )
+    cols = st.columns(6)
+    cols[0].metric("Total", total)
+    cols[1].metric("IMDB Matched", matched_imdb)
+    cols[2].metric("Verified", verified)
+    cols[3].metric("Duplicates", duplicates)
+    cols[4].metric("Conflicts", conflicts)
+    cols[5].metric("Needs Review", needs_review)
 
-        df = pd.DataFrame(results)
-        display_cols = [
-            "title", "type", "release_year", "content_id", "imdb_id",
-            "imdb_confidence", "is_duplicate", "duplicate_content_id",
-            "duplicate_title", "has_policy_conflict", "policy_details",
-        ]
-        display_cols = [c for c in display_cols if c in df.columns]
+    # Verification wizard for MEDIUM/LOW/CONFLICT results
+    verify_indices = [
+        i for i, r in enumerate(match_results)
+        if r.confidence in (Confidence.MEDIUM, Confidence.LOW, Confidence.CONFLICT)
+        and r.imdb_id
+        and i not in st.session_state.get("dupe_verify_decisions", {})
+    ]
 
-        with tab_all:
-            st.dataframe(df[display_cols], use_container_width=True, hide_index=True)
+    if verify_indices:
+        _render_verification_wizard(verify_indices, match_results, requests)
 
-        with tab_dupes:
-            dupe_df = df[df["is_duplicate"] == True]
-            if not dupe_df.empty:
-                dupe_cols = [
-                    "title", "type", "release_year", "imdb_id",
-                    "duplicate_content_id", "duplicate_title",
-                    "duplicate_active", "duplicate_import_id",
-                    "has_policy_conflict", "policy_details",
-                ]
-                dupe_cols = [c for c in dupe_cols if c in dupe_df.columns]
-                st.dataframe(dupe_df[dupe_cols], use_container_width=True, hide_index=True)
-            else:
-                st.success("No duplicates found.")
+    # Results tabs
+    df = pd.DataFrame(results)
+    display_cols = [
+        "title", "type", "release_year", "imdb_id", "confidence",
+        "content_id", "is_duplicate", "duplicate_content_id",
+        "duplicate_title", "has_policy_conflict", "policy_details",
+    ]
+    display_cols = [c for c in display_cols if c in df.columns]
 
-        with tab_conflicts:
-            conflict_df = df[df["has_policy_conflict"] == True]
-            if not conflict_df.empty:
-                conflict_cols = [
-                    "title", "imdb_id", "duplicate_content_id",
-                    "duplicate_title", "policy_details",
-                ]
-                conflict_cols = [c for c in conflict_cols if c in conflict_df.columns]
-                st.dataframe(conflict_df[conflict_cols], use_container_width=True, hide_index=True)
-            else:
-                st.success("No policy conflicts found.")
+    tab_all, tab_dupes, tab_review, tab_unmatched = st.tabs([
+        "All Results",
+        f"Duplicates ({duplicates})",
+        f"Needs Review ({needs_review})",
+        f"No Match ({total - matched_imdb})",
+    ])
 
-        with tab_unmatched:
-            unmatched_df = df[df["imdb_id"] == ""]
-            if not unmatched_df.empty:
-                st.dataframe(
-                    unmatched_df[["title", "type", "release_year", "content_id", "content_id_match"]],
-                    use_container_width=True, hide_index=True,
-                )
-            else:
-                st.success("All titles matched to IMDB IDs.")
+    with tab_all:
+        st.dataframe(df[display_cols], use_container_width=True, hide_index=True)
 
-        # Downloads
-        st.divider()
-        col1, col2, col3 = st.columns(3)
+    with tab_dupes:
+        dupe_df = df[df["is_duplicate"] == True]
+        if not dupe_df.empty:
+            st.dataframe(dupe_df[display_cols], use_container_width=True, hide_index=True)
+        else:
+            st.success("No duplicates found.")
+
+    with tab_review:
+        review_df = df[df["confidence"].isin(["LOW", "MEDIUM", "CONFLICT"])]
+        if not review_df.empty:
+            st.dataframe(review_df[display_cols], use_container_width=True, hide_index=True)
+        else:
+            st.success("All matches are HIGH confidence or VERIFIED.")
+
+    with tab_unmatched:
+        unmatched_df = df[df["imdb_id"] == ""]
+        if not unmatched_df.empty:
+            st.dataframe(unmatched_df[["title", "type", "release_year", "content_id"]], use_container_width=True, hide_index=True)
+        else:
+            st.success("All titles matched to IMDB IDs.")
+
+    # Downloads
+    st.divider()
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.download_button("Download all results", df.to_csv(index=False), "imdb_dupe_check_results.csv", "text/csv")
+    with col2:
+        if duplicates > 0:
+            st.download_button("Download duplicates", df[df["is_duplicate"] == True].to_csv(index=False), "duplicates.csv", "text/csv")
+    with col3:
+        if total - matched_imdb > 0:
+            st.download_button("Download unmatched", df[df["imdb_id"] == ""].to_csv(index=False), "unmatched.csv", "text/csv")
+
+
+def _render_verification_wizard(verify_indices, match_results, requests):
+    """Render the verification wizard for MEDIUM/LOW/CONFLICT matches."""
+    decisions = st.session_state.get("dupe_verify_decisions", {})
+    unresolved = [i for i in verify_indices if i not in decisions]
+    total_to_verify = len(verify_indices)
+    completed = total_to_verify - len(unresolved)
+
+    if not unresolved:
+        st.markdown(f"""
+        <div style="background:#ecfdf5; border:1px solid #a7f3d0; border-radius:12px; padding:12px 16px; margin:12px 0;">
+            <span style="font-size:14px; color:#065f46; font-weight:600;">
+                ✓ All {total_to_verify} verification{'s' if total_to_verify > 1 else ''} complete
+            </span>
+        </div>
+        """, unsafe_allow_html=True)
+        return
+
+    current_idx = unresolved[0]
+    result = match_results[current_idx]
+    req = requests[current_idx]
+
+    if result.confidence == Confidence.CONFLICT:
+        wizard_bg = "#fef2f2"
+        wizard_border = "#fecaca"
+        wizard_title = "Resolve Conflict"
+        wizard_prompt = f"Two paths found different IMDB IDs for <strong>{req.title}</strong>"
+    else:
+        wizard_bg = "#fffbeb"
+        wizard_border = "#fde68a"
+        wizard_title = "Verify Match"
+        wizard_prompt = f"Confirm IMDB match for <strong>{req.title}</strong> ({result.confidence.value} confidence)"
+
+    st.markdown(f"""
+    <div style="background:{wizard_bg}; border:1px solid {wizard_border}; border-radius:12px; padding:16px 20px; margin:12px 0;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+            <div style="font-family:'Space Grotesk',sans-serif; font-size:16px; font-weight:700; color:#1b1626;">
+                {wizard_title}
+            </div>
+            <div style="font-size:12px; color:#8a8199; font-weight:600;">
+                {completed + 1} of {total_to_verify}
+            </div>
+        </div>
+        <div style="font-size:14px; color:#4b4458; margin-bottom:8px;">
+            {wizard_prompt}
+        </div>
+        <div style="font-size:12px; color:#8a8199;">
+            Input: {req.title} | {req.content_type or 'Unknown type'} | {req.release_year or 'No year'}
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # Show candidates
+    candidates = []
+    if result.imdb_id:
+        candidates.append(("Path A", result.imdb_id, result.imdb_title, result.imdb_year))
+    if result.alternate_imdb_id:
+        candidates.append(("Path B", result.alternate_imdb_id, None, None))
+
+    for label, imdb_id, imdb_title, imdb_year in candidates:
+        meta_str = f" — {imdb_title}" if imdb_title else ""
+        year_str = f" ({imdb_year})" if imdb_year else ""
+        col1, col2 = st.columns([5, 1])
         with col1:
-            st.download_button(
-                "Download all results",
-                df.to_csv(index=False),
-                "imdb_dupe_check_results.csv",
-                "text/csv",
-            )
+            st.markdown(f"""
+            <div style="display:flex; align-items:center; gap:12px; padding:8px 12px; background:#fff; border:1px solid #e7e3ee; border-radius:8px; margin-bottom:4px;">
+                <span style="font-size:11px; font-weight:600; color:#8a8199;">{label}</span>
+                <code style="font-size:14px; font-weight:600; color:#1b1626;">{imdb_id}</code>
+                <span style="font-size:13px; color:#4b4458;">{meta_str}{year_str}</span>
+            </div>
+            """, unsafe_allow_html=True)
         with col2:
-            if duplicates > 0:
-                st.download_button(
-                    "Download duplicates only",
-                    df[df["is_duplicate"] == True].to_csv(index=False),
-                    "duplicates.csv",
-                    "text/csv",
-                )
-        with col3:
-            if no_match > 0:
-                st.download_button(
-                    "Download unmatched only",
-                    df[df["imdb_id"] == ""].to_csv(index=False),
-                    "unmatched_titles.csv",
-                    "text/csv",
-                )
+            if st.button("Confirm", key=f"verify_{current_idx}_{imdb_id}", use_container_width=True):
+                _record_user_verification(current_idx, imdb_id, result, req)
+                st.rerun()
+
+    # Skip button
+    if st.button("Skip →", key=f"verify_skip_{current_idx}"):
+        st.session_state.dupe_verify_decisions[current_idx] = "__skip__"
+        st.rerun()
+
+
+def _record_user_verification(idx, confirmed_imdb_id, result, req):
+    """Record the user's verification choice."""
+    _, verifier, _, _ = _get_engine()
+    user_email = _get_user_email()
+
+    record = VerificationRecord(
+        title=req.title,
+        imdb_id=confirmed_imdb_id,
+        verified_by=user_email,
+        content_type=req.content_type,
+        release_year=req.release_year,
+        content_id=result.content_id or "",
+        imdb_title=result.imdb_title or "",
+        match_method=result.match_method.value,
+        verified_at=datetime.now(timezone.utc),
+        import_id=req.import_id,
+    )
+    try:
+        verifier.record_verification(record)
+    except Exception:
+        pass
+
+    st.session_state.dupe_verify_decisions[idx] = confirmed_imdb_id
+    # Update display results
+    if "dupe_results" in st.session_state and idx < len(st.session_state.dupe_results):
+        st.session_state.dupe_results[idx]["confidence"] = "VERIFIED"
+        st.session_state.dupe_results[idx]["imdb_id"] = confirmed_imdb_id
