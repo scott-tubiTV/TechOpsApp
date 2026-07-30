@@ -13,6 +13,7 @@ from imdb_engine import (
     IMDBEngineConfig,
     IMDBMatcher,
     IMDBVerifier,
+    MatchMethod,
     MatchRequest,
     MatchResult,
     SQLClient,
@@ -75,6 +76,7 @@ def parse_csv_input(text):
         "type": ["type", "prod type", "content type", "content_type"],
         "release_year": ["release year", "release_year", "year"],
         "director": ["director"],
+        "imdb_id": ["imdb_id", "imdb id", "imdb"],
     }
     for field, keywords in header_keywords.items():
         for i, col in enumerate(first_row):
@@ -118,34 +120,115 @@ def parse_csv_input(text):
         if dir_idx is not None and dir_idx < len(row):
             director = row[dir_idx].strip()
 
-        results.append(MatchRequest(
+        # Pre-extracted IMDB ID (from Excel URL parsing)
+        known_imdb = ""
+        imdb_idx = col_map.get("imdb_id")
+        if imdb_idx is not None and imdb_idx < len(row):
+            val = row[imdb_idx].strip()
+            if val.startswith("tt"):
+                known_imdb = val
+
+        req = MatchRequest(
             title=title,
             content_type=content_type,
             release_year=release_year,
             director=director,
-        ))
+        )
+        # Attach known IMDB ID as metadata for the pipeline
+        req._known_imdb_id = known_imdb
+        results.append(req)
     return results
 
 
 def _parse_excel_to_csv(uploaded_file):
-    """Read an Excel file and convert to CSV text for parse_csv_input."""
-    df = pd.read_excel(uploaded_file, dtype=str, engine="openpyxl")
-    df.columns = [c.strip().lower() for c in df.columns]
+    """Read an Excel file and convert to CSV text for parse_csv_input.
 
-    # Map common Excel column names to our expected headers
+    Handles messy partner avails files with banner rows and merged headers.
+    Detects the real header row by looking for a cell containing 'TITLE'.
+    Extracts IMDB IDs from URL columns if present.
+    """
+    raw = pd.read_excel(uploaded_file, dtype=str, engine="openpyxl", header=None)
+
+    # Find the header row — look for a row containing "TITLE"
+    header_row = 0
+    for i in range(min(20, len(raw))):
+        row_vals = [str(v).strip().upper() for v in raw.iloc[i].tolist() if str(v) != "nan"]
+        if "TITLE" in row_vals:
+            header_row = i
+            break
+
+    # Use that row as headers, data starts after it (skip one more if it's a sub-header)
+    headers = [str(h).strip() if str(h) != "nan" else f"col_{j}" for j, h in enumerate(raw.iloc[header_row].tolist())]
+    data_start = header_row + 1
+
+    # Check if row after header is also a sub-header (e.g., section divider)
+    if data_start < len(raw):
+        first_data = raw.iloc[data_start].tolist()
+        non_null = [str(v) for v in first_data if str(v) != "nan"]
+        # If very few values and looks like a section label, skip it
+        if len(non_null) <= 2:
+            data_start += 1
+
+    df = raw.iloc[data_start:].copy()
+    df.columns = headers
+
+    # Normalize column names for mapping
+    col_lower = {col: col.strip().lower().rstrip() for col in df.columns}
+
+    # Map to our expected format
     col_renames = {}
-    for col in df.columns:
-        if col in ("title", "name", "content_name", "movie title", "series title"):
+    imdb_col = None
+    for col, lower in col_lower.items():
+        if lower in ("title", "name", "content_name", "movie title", "series title"):
             col_renames[col] = "title"
-        elif col in ("type", "prod type", "content type", "content_type"):
+        elif lower in ("type", "prod type", "content type", "content_type", "category"):
             col_renames[col] = "type"
-        elif col in ("release year", "release_year", "year"):
+        elif lower in ("release year", "release_year", "year", "rls", "rls year"):
             col_renames[col] = "year"
-        elif col in ("director", "directors"):
+        elif lower in ("director", "directors"):
             col_renames[col] = "director"
+        elif "imdb" in lower:
+            imdb_col = col
+
     df = df.rename(columns=col_renames)
 
-    return df.to_csv(index=False)
+    # Filter out rows without a title
+    if "title" in df.columns:
+        df = df[df["title"].notna() & (df["title"].str.strip() != "")]
+    else:
+        return ""
+
+    # Extract IMDB ID from URL column if present
+    if imdb_col and imdb_col not in col_renames:
+        df["imdb_id"] = df[imdb_col].apply(_extract_imdb_id_from_url)
+
+    # Map category values to MOVIE/SERIES type if we used category as type
+    if "type" in df.columns:
+        df["type"] = df["type"].apply(_map_category_to_type)
+
+    # Select only the columns we care about
+    keep_cols = [c for c in ["title", "type", "year", "director", "imdb_id"] if c in df.columns]
+    return df[keep_cols].to_csv(index=False)
+
+
+def _extract_imdb_id_from_url(val):
+    """Extract ttXXXXXXX from an IMDB URL."""
+    if not val or str(val) == "nan":
+        return ""
+    match = re.search(r"(tt\d{7,})", str(val))
+    return match.group(1) if match else ""
+
+
+def _map_category_to_type(val):
+    """Map partner category labels to MOVIE/SERIES."""
+    if not val or str(val) == "nan":
+        return ""
+    val_lower = str(val).strip().lower()
+    if "series" in val_lower or "tv" in val_lower:
+        return "SERIES"
+    if "film" in val_lower or "movie" in val_lower:
+        return "MOVIE"
+    return ""
 
 
 def _find_duplicates(imdb_ids, sql_client, config):
@@ -153,19 +236,37 @@ def _find_duplicates(imdb_ids, sql_client, config):
     if not imdb_ids:
         return {}
     id_list = ", ".join(f"'{escape_sql(iid)}'" for iid in imdb_ids)
-    rows = sql_client.execute(f"""
-        SELECT
-            rc.imdb_id,
-            rc.tubi_video_id AS existing_content_id,
-            ci.title AS existing_title,
-            ci.active,
-            ci.content_type,
-            ci.import_id
-        FROM {config.rich_content_table} rc
-        JOIN {config.content_info_table} ci ON ci.content_id = rc.tubi_video_id
-        WHERE rc.imdb_id IN ({id_list})
-          AND rc.tubi_video_id IS NOT NULL
-    """)
+
+    # Try rich_content first (most complete mapping), fall back to content_info
+    try:
+        rows = sql_client.execute(f"""
+            SELECT
+                rc.imdb_id,
+                rc.tubi_video_id AS existing_content_id,
+                ci.title AS existing_title,
+                ci.active,
+                ci.content_type,
+                ci.import_id
+            FROM {config.rich_content_table} rc
+            JOIN {config.content_info_table} ci ON ci.content_id = rc.tubi_video_id
+            WHERE rc.imdb_id IN ({id_list})
+              AND rc.tubi_video_id IS NOT NULL
+        """)
+    except Exception:
+        # Fallback: use content_info imdb_id/program_imdb_id directly
+        rows = sql_client.execute(f"""
+            SELECT
+                COALESCE(imdb_id, program_imdb_id) AS imdb_id,
+                content_id AS existing_content_id,
+                title AS existing_title,
+                active,
+                content_type,
+                import_id
+            FROM {config.content_info_table}
+            WHERE (imdb_id IN ({id_list}) OR program_imdb_id IN ({id_list}))
+              AND content_id IS NOT NULL
+        """)
+
     dupes = {}
     for r in rows:
         dupes.setdefault(r["imdb_id"], []).append(r)
@@ -293,8 +394,40 @@ def render_imdb_dupe_checker():
         try:
             matcher, verifier, sql_client, config = _get_engine()
 
-            # Run the matching engine
-            match_results = matcher.match(requests, progress_callback=lambda msg: progress.info(msg))
+            # Split: titles with pre-extracted IMDB IDs vs those needing matching
+            needs_matching = []
+            pre_matched = {}
+            for i, req in enumerate(requests):
+                known = getattr(req, "_known_imdb_id", "")
+                if known:
+                    pre_matched[i] = MatchResult(
+                        request=req,
+                        imdb_id=known,
+                        confidence=Confidence.HIGH,
+                        match_method=MatchMethod.DIRECT_CONTENT_INFO,
+                        metadata={"source": "file_provided"},
+                    )
+                else:
+                    needs_matching.append((i, req))
+
+            # Run the matching engine only on titles that need it
+            match_results = [None] * len(requests)
+            for i, result in pre_matched.items():
+                match_results[i] = result
+
+            if needs_matching:
+                unmatched_reqs = [req for _, req in needs_matching]
+                progress.info(f"Matching {len(unmatched_reqs)} titles (skipping {len(pre_matched)} with known IMDB IDs)...")
+                engine_results = matcher.match(unmatched_reqs, progress_callback=lambda msg: progress.info(msg))
+                for j, (orig_idx, _) in enumerate(needs_matching):
+                    match_results[orig_idx] = engine_results[j]
+            else:
+                progress.info(f"All {len(requests)} titles have IMDB IDs from file.")
+
+            # Fill any gaps
+            for i in range(len(match_results)):
+                if match_results[i] is None:
+                    match_results[i] = MatchResult(request=requests[i])
 
             # Collect IMDB IDs for dupe detection
             progress.info("Checking for duplicates...")

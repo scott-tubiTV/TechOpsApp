@@ -118,15 +118,18 @@ class DirectLookupStrategy:
             else:
                 cids_needing_rc.append((idx, row["content_id"], row))
 
-        # Batch lookup in rich_content
+        # Batch lookup in rich_content (may fail if SP lacks catalog access)
         if cids_needing_rc:
             cid_list = ", ".join(f"'{escape_sql(cid)}'" for _, cid, _ in cids_needing_rc)
-            rc_rows = sql_client.execute(f"""
-                SELECT tubi_video_id AS content_id, imdb_id
-                FROM {self.config.rich_content_table}
-                WHERE tubi_video_id IN ({cid_list})
-                  AND imdb_id IS NOT NULL AND TRIM(imdb_id) != ''
-            """)
+            try:
+                rc_rows = sql_client.execute(f"""
+                    SELECT tubi_video_id AS content_id, imdb_id
+                    FROM {self.config.rich_content_table}
+                    WHERE tubi_video_id IN ({cid_list})
+                      AND imdb_id IS NOT NULL AND TRIM(imdb_id) != ''
+                """)
+            except Exception:
+                rc_rows = []
             rc_map = {r["content_id"]: r["imdb_id"] for r in rc_rows}
 
             for idx, cid, ci_row in cids_needing_rc:
