@@ -495,40 +495,82 @@ def parse_input_lines(text: str) -> list:
     if not has_header:
         col_map = {"title": 0}
 
+    def _is_metadata_value(val):
+        """Check if a CSV cell looks like a metadata field rather than part of a title."""
+        v = val.strip().upper()
+        if v in ("MOVIE", "SERIES", "FEATURE", "DTV/FT FGN REL", "DTV/FT US MIN"):
+            return True
+        if re.match(r"^\d{4}$", v):
+            return True
+        return False
+
     for row in rows_list[start_idx:]:
         if not row or not row[0].strip():
             continue
         title_idx = col_map.get("title", 0)
         if title_idx >= len(row):
             continue
-        title = row[title_idx].strip()
+
+        # Handle commas inside titles that csv.reader splits incorrectly.
+        # When row has more columns than the header expects, the extra cells
+        # are part of the title (commas within the title weren't quoted).
+        num_header_cols = len(first_row) if has_header else 1
+        extra = len(row) - num_header_cols
+        type_val = ""
+        year_val = ""
+        if extra > 0 and has_header:
+            # Rejoin the title cell with the extra fragments that follow it
+            title = ",".join(row[title_idx:title_idx + 1 + extra]).strip()
+        elif extra > 0 and not has_header:
+            title_parts = [row[title_idx]]
+            type_val = ""
+            year_val = ""
+            for part in row[title_idx + 1:]:
+                if _is_metadata_value(part):
+                    v = part.strip().upper()
+                    if v in ("MOVIE", "SERIES", "FEATURE", "DTV/FT FGN REL", "DTV/FT US MIN"):
+                        type_val = v
+                    elif re.match(r"^\d{4}$", v):
+                        year_val = v
+                else:
+                    title_parts.append(part)
+            title = ",".join(title_parts).strip()
+        else:
+            title = row[title_idx].strip()
+
         if not title or title.lower() == "title":
             continue
 
+        # When extra columns exist from unquoted commas, shift non-title indices
+        idx_offset = extra if (extra > 0 and has_header) else 0
+
         title_type = ""
         type_idx = col_map.get("type")
-        if type_idx is not None and type_idx < len(row):
-            val = row[type_idx].strip().upper()
+        if type_idx is not None and (type_idx + idx_offset) < len(row):
+            val = row[type_idx + idx_offset].strip().upper()
             if val in ("MOVIE", "SERIES"):
                 title_type = val
             elif val in ("FEATURE", "DTV/FT FGN REL", "DTV/FT US MIN"):
                 title_type = "MOVIE"
-        elif len(row) > 1 and "type" not in col_map:
-            val = row[1].strip().upper()
-            if val in ("MOVIE", "SERIES"):
-                title_type = val
+        elif not has_header and type_val:
+            if type_val in ("MOVIE", "SERIES"):
+                title_type = type_val
+            elif type_val in ("FEATURE", "DTV/FT FGN REL", "DTV/FT US MIN"):
+                title_type = "MOVIE"
 
         release_year = ""
         year_idx = col_map.get("release_year")
-        if year_idx is not None and year_idx < len(row):
-            val = row[year_idx].strip()
+        if year_idx is not None and (year_idx + idx_offset) < len(row):
+            val = row[year_idx + idx_offset].strip()
             if re.match(r"^\d{4}$", val):
                 release_year = val
+        elif not has_header and year_val:
+            release_year = year_val
 
         language = ""
         lang_idx = col_map.get("language")
-        if lang_idx is not None and lang_idx < len(row):
-            language = row[lang_idx].strip()
+        if lang_idx is not None and (lang_idx + idx_offset) < len(row):
+            language = row[lang_idx + idx_offset].strip()
 
         results.append({
             "title": title,
