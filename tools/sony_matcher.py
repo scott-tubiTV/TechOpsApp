@@ -247,6 +247,7 @@ def _record_verification(title, import_id, selected_content_id, candidate_ids, s
         VALUES ('{title.replace("'", "''")}', '{import_id}', '{selected_content_id}',
                 '{candidates_str}', '{selected_by}', '{ts}')
     """)
+    _load_prior_verifications.clear()
 
 
 @st.cache_data(ttl=3600)
@@ -740,8 +741,8 @@ def render_content_id_matcher():
                                         cids,
                                         user_email,
                                     )
-                                except Exception:
-                                    pass
+                                except Exception as e:
+                                    st.toast(f"Failed to save verification: {e}", icon="⚠️")
                                 if current_pos + 1 < len(unresolved):
                                     st.session_state.verify_index = current_pos + 1
                                 else:
@@ -763,8 +764,8 @@ def render_content_id_matcher():
                                         cids,
                                         user_email,
                                     )
-                                except Exception:
-                                    pass
+                                except Exception as e:
+                                    st.toast(f"Failed to save verification: {e}", icon="⚠️")
                                 if current_pos + 1 < len(unresolved):
                                     st.session_state.verify_index = current_pos + 1
                                 else:
