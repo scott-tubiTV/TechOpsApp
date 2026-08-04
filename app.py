@@ -25,6 +25,7 @@ TOOL_USERS = [
     "caitlinlittle@tubi.tv",
     "marianladiona@tubi.tv",
     "jhudson@tubi.tv",
+    "jalvergue@tubi.tv",
 ]
 
 TOOLS = {
@@ -322,9 +323,30 @@ def main():
     with st.sidebar:
         st.markdown(f"""
         <div style="padding: 4px 0 12px; display:flex; align-items:center; gap:10px;">
-            <div style="width:26px; height:26px; border-radius:7px; background:linear-gradient(140deg, #8b3dff, #c026d3);"></div>
+            <svg width="28" height="28" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <rect width="28" height="28" rx="7" fill="url(#argo_grad)"/>
+                <path d="M14 6L16.5 11.5L22 14L16.5 16.5L14 22L11.5 16.5L6 14L11.5 11.5L14 6Z" fill="white" opacity="0.95"/>
+                <path d="M14 9L15.5 12.5L19 14L15.5 15.5L14 19L12.5 15.5L9 14L12.5 12.5L14 9Z" fill="white"/>
+                <defs><linearGradient id="argo_grad" x1="0" y1="0" x2="28" y2="28"><stop stop-color="#7c3aed"/><stop offset="1" stop-color="#a855f7"/></linearGradient></defs>
+            </svg>
             <div style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:17px; letter-spacing:-0.01em; color:#1b1626 !important;">Argo</div>
         </div>
+        """, unsafe_allow_html=True)
+
+        st.markdown("""
+        <style>
+        [data-testid="stSidebar"] .stButton > button[kind="primary"] {
+            background: transparent !important;
+            color: #7c3aed !important;
+            border: 1.5px solid #7c3aed !important;
+            box-shadow: 0 2px 8px rgba(124,58,237,0.12);
+            font-weight: 700;
+        }
+        [data-testid="stSidebar"] .stButton > button[kind="primary"]:hover {
+            background: #f3ecfd !important;
+            box-shadow: 0 4px 14px rgba(124,58,237,0.18);
+        }
+        </style>
         """, unsafe_allow_html=True)
 
         if st.button("+ New query", use_container_width=True, type="primary"):
@@ -334,27 +356,22 @@ def main():
         st.divider()
 
         # Conversation history
+        if "show_history_panel" not in st.session_state:
+            st.session_state.show_history_panel = False
+
         st.markdown("""
         <div style="font-size:10.5px; font-weight:700; letter-spacing:0.13em; color:#9990a8; text-transform:uppercase; padding:0 0 6px;">
             Recent
         </div>
         """, unsafe_allow_html=True)
 
-        conv_search = st.text_input(
-            "Search conversations",
-            key="conv_search",
-            placeholder="Search...",
-            label_visibility="collapsed",
-        )
-
         try:
-            conv_limit = 50 if conv_search else 5
-            conversations = list_conversations(user_email, search=conv_search, limit=conv_limit)
+            recent_conversations = list_conversations(user_email, search="", limit=5)
         except Exception:
-            conversations = []
+            recent_conversations = []
 
-        if conversations:
-            for conv in conversations:
+        if recent_conversations:
+            for conv in recent_conversations:
                 is_current = (st.session_state.argo_conversation_id == conv["conversation_id"])
                 label = conv["title"] or "Untitled"
                 if conv.get("shared_with") and conv.get("user_email") != user_email:
@@ -368,8 +385,12 @@ def main():
                 ):
                     _load_past_conversation(conv["conversation_id"], user_email)
                     st.rerun()
-        elif not conv_search:
+        elif not st.session_state.show_history_panel:
             st.caption("No conversations yet.")
+
+        if st.button("View all conversations", key="view_all_convos", use_container_width=True):
+            st.session_state.show_history_panel = not st.session_state.show_history_panel
+            st.rerun()
 
         st.divider()
 
@@ -473,6 +494,11 @@ def main():
             tool_config["renderer"]()
         return
 
+    # Full conversation history panel
+    if st.session_state.get("show_history_panel"):
+        _render_history_panel(user_email)
+        return
+
     # Handle pending suggestion (from welcome cards)
     pending = st.session_state.pop("_pending_suggestion", None)
 
@@ -484,6 +510,92 @@ def main():
         _render_welcome(user_name)
     else:
         _render_chat(prompt, user_email)
+
+
+def _render_history_panel(user_email):
+    """Full conversation history panel with search and date grouping."""
+    if st.button("← Back to Chat", key="back_from_history"):
+        st.session_state.show_history_panel = False
+        st.rerun()
+
+    st.markdown("""
+    <div style="padding: 12px 0 4px;">
+        <div style="font-family:'Space Grotesk',sans-serif; font-size:22px; font-weight:700; letter-spacing:-0.02em; color:#1b1626;">
+            Conversation History
+        </div>
+        <div style="font-size:13px; color:#8a8199; margin-top:4px;">
+            Search or browse all past conversations.
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    history_search = st.text_input(
+        "Search conversations",
+        key="history_search",
+        placeholder="Search by topic...",
+        label_visibility="collapsed",
+    )
+
+    try:
+        all_conversations = list_conversations(user_email, search=history_search or "", limit=50)
+    except Exception:
+        all_conversations = []
+
+    if not all_conversations:
+        st.info("No conversations found." if history_search else "No conversations yet.")
+        return
+
+    from datetime import datetime, date
+
+    today = date.today()
+    grouped = {}
+    for conv in all_conversations:
+        updated = conv.get("updated_at", "")
+        try:
+            conv_date = datetime.fromisoformat(updated.replace("Z", "+00:00")).date()
+            delta = (today - conv_date).days
+            if delta == 0:
+                group = "Today"
+            elif delta == 1:
+                group = "Yesterday"
+            elif delta < 7:
+                group = "This week"
+            elif delta < 30:
+                group = "This month"
+            else:
+                group = conv_date.strftime("%B %Y")
+        except (ValueError, AttributeError):
+            group = "Older"
+        grouped.setdefault(group, []).append(conv)
+
+    for group_name, convs in grouped.items():
+        st.markdown(f"""
+        <div style="font-size:11px; font-weight:700; letter-spacing:0.1em; color:#9990a8; text-transform:uppercase; padding:16px 0 6px; border-bottom:1px solid #e7e3ee; margin-bottom:4px;">
+            {group_name}
+        </div>
+        """, unsafe_allow_html=True)
+
+        for conv in convs:
+            is_current = (st.session_state.argo_conversation_id == conv["conversation_id"])
+            title = conv.get("title") or "Untitled"
+            space = conv.get("space_name") or ""
+            msg_count = conv.get("message_count", 0)
+            shared = "[Shared] " if conv.get("shared_with") and conv.get("user_email") != user_email else ""
+
+            col_title, col_meta = st.columns([4, 1])
+            with col_title:
+                btn_type = "primary" if is_current else "secondary"
+                if st.button(
+                    f"{shared}{title}",
+                    key=f"hist_{conv['conversation_id']}",
+                    use_container_width=True,
+                    type=btn_type,
+                ):
+                    _load_past_conversation(conv["conversation_id"], user_email)
+                    st.session_state.show_history_panel = False
+                    st.rerun()
+            with col_meta:
+                st.caption(f"{space}  ·  {msg_count} msgs")
 
 
 def _render_instructions_manager():
