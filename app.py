@@ -347,7 +347,8 @@ def main():
         )
 
         try:
-            conversations = list_conversations(user_email, search=conv_search)
+            conv_limit = 50 if conv_search else 5
+            conversations = list_conversations(user_email, search=conv_search, limit=conv_limit)
         except Exception:
             conversations = []
 
