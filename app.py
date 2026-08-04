@@ -43,13 +43,13 @@ GENIE_SPACES = {
     "Content Metrics": {
         "id": os.environ.get("GENIE_SPACE_TECHOPS", "01f18b97de0117d8af61d23c1eaa8d7e"),
         "description": "Ops metrics: policy snapshots, avails status, imports, images, partners, QA/ABF, workload, content refresh",
-        "keywords": ["policy", "avail", "import", "image", "qa", "abf", "workload", "snapshot", "metric", "weekly", "monthly", "refresh", "gate", "published", "curation", "redelivery", "open redeliveries", "how many", "count", "total", "trend", "queue", "review"],
+        "keywords": ["policy", "avail", "import", "image", "qa", "abf", "workload", "snapshot", "metric", "weekly", "monthly", "refresh", "gate", "published", "curation", "how many", "count", "total", "trend", "queue", "review"],
         "color": "#a855f7",
     },
     "Redeliveries": {
         "id": os.environ.get("GENIE_SPACE_REDELIVERIES", "01f18b97de2f122eb27a1b307d68e50e"),
         "description": "Redelivery detail: per-title breakdown by reason, modality, age, partner, and dismissal status",
-        "keywords": ["dismissed", "modality", "video file", "subtitle file", "image file", "overdue", "oldest", "reason", "redelivery reason", "which titles", "list redeliveries", "specific redelivery"],
+        "keywords": ["redelivery", "redeliver", "dismissed", "modality", "video file", "subtitle file", "image file", "overdue", "backlog", "oldest", "reason", "open redeliveries", "partner"],
         "color": "#f59e0b",
     },
     "Dupe Checker V2": {
