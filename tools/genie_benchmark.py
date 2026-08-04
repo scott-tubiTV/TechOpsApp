@@ -58,23 +58,8 @@ def _execute_sql(query):
 
 
 def _ensure_benchmark_table():
-    """Create the benchmarks Delta table if it does not exist."""
-    _execute_sql(f"""
-        CREATE TABLE IF NOT EXISTS {BENCHMARK_TABLE} (
-            benchmark_id STRING,
-            space_id STRING,
-            space_name STRING,
-            question STRING,
-            expected_table STRING,
-            validation_sql STRING,
-            tolerance_type STRING,
-            tolerance_value DOUBLE,
-            is_active BOOLEAN,
-            created_at TIMESTAMP,
-            updated_at TIMESTAMP
-        )
-        USING DELTA
-    """)
+    """Verify the benchmarks Delta table exists (created externally with proper permissions)."""
+    _execute_sql(f"SELECT 1 FROM {BENCHMARK_TABLE} LIMIT 1")
 
 
 def _load_benchmarks():
