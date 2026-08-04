@@ -14,6 +14,7 @@ from conversation_store import (
 )
 from tools.sony_matcher import render_content_id_matcher
 from tools.imdb_dupe_checker import render_imdb_dupe_checker
+from tools.genie_benchmark import render_genie_benchmark
 
 ADMIN_EMAILS = [
     "swhitney@tubi.tv",
@@ -455,10 +456,16 @@ def main():
             if st.button("⚙ Manage Instructions", key="manage_instructions", use_container_width=True):
                 st.session_state.active_tool = "_instructions"
                 st.rerun()
+            if st.button("📊 Genie Benchmark", key="genie_benchmark", use_container_width=True):
+                st.session_state.active_tool = "_benchmark"
+                st.rerun()
 
     # If a tool is active, render it instead of chat
     if st.session_state.active_tool == "_instructions" and is_admin(user_email):
         _render_instructions_manager()
+        return
+    if st.session_state.active_tool == "_benchmark" and is_admin(user_email):
+        render_genie_benchmark()
         return
     if st.session_state.active_tool and has_tool_access(user_email):
         tool_config = TOOLS.get(st.session_state.active_tool)
