@@ -1,0 +1,560 @@
+{
+  "spaces": {
+    "Content Metrics": {
+      "id": "01f18b97de0117d8af61d23c1eaa8d7e"
+    },
+    "Redeliveries": {
+      "id": "01f18b97de2f122eb27a1b307d68e50e"
+    },
+    "Partner Detail": {
+      "id": "01f1912d11a91341b59b2836ca3777c6"
+    }
+  },
+  "warehouse_id": "a6b9541289d75c6e",
+  "tests": [
+    {
+      "id": "avails_new_this_month",
+      "question": "How many new avails were created this month?",
+      "space": "Content Metrics",
+      "validation_sql": "SELECT COUNT(*) as answer FROM core_dev.techops.avails_status_snapshot WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM core_dev.techops.avails_status_snapshot) AND inserted_at >= date_trunc('month', current_date())",
+      "check": "percentage",
+      "tolerance": 0.05,
+      "expected_table": "avails_status_snapshot"
+    },
+    {
+      "id": "avails_new_by_type",
+      "question": "How many new avails were created this month broken down by content type?",
+      "space": "Content Metrics",
+      "validation_sql": "SELECT content_type, COUNT(*) as count FROM core_dev.techops.avails_status_snapshot WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM core_dev.techops.avails_status_snapshot) AND inserted_at >= date_trunc('month', current_date()) GROUP BY content_type",
+      "check": "table_used",
+      "expected_table": "avails_status_snapshot"
+    },
+    {
+      "id": "avails_pending_review",
+      "question": "How many avails are currently in pending review status?",
+      "space": "Content Metrics",
+      "validation_sql": "SELECT COUNT(*) as answer FROM core_dev.techops.avails_status_snapshot WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM core_dev.techops.avails_status_snapshot) AND avail_status = 'pending_review'",
+      "check": "percentage",
+      "tolerance": 0.05,
+      "expected_table": "avails_status_snapshot"
+    },
+    {
+      "id": "imports_last_month",
+      "question": "How many titles were imported last month?",
+      "space": "Content Metrics",
+      "validation_sql": "SELECT SUM(count) as answer FROM core_dev.techops.imported_titles_monthly WHERE month = date_trunc('month', dateadd(MONTH, -1, current_date()))",
+      "check": "percentage",
+      "tolerance": 0.05,
+      "expected_table": "imported_titles_monthly"
+    },
+    {
+      "id": "imports_last_month_by_type",
+      "question": "How many titles were imported last month by content type?",
+      "space": "Content Metrics",
+      "validation_sql": "SELECT content_type, SUM(count) as count FROM core_dev.techops.imported_titles_monthly WHERE month = date_trunc('month', dateadd(MONTH, -1, current_date())) GROUP BY content_type",
+      "check": "table_used",
+      "expected_table": "imported_titles_monthly"
+    },
+    {
+      "id": "imports_this_month",
+      "question": "How many titles were imported this month?",
+      "space": "Content Metrics",
+      "validation_sql": "SELECT SUM(count) as answer FROM core_dev.techops.imported_titles_monthly WHERE month = date_trunc('month', current_date())",
+      "check": "percentage",
+      "tolerance": 0.05,
+      "expected_table": "imported_titles_monthly"
+    },
+    {
+      "id": "contractor_reviews_this_month",
+      "question": "How many titles did contractors review this month?",
+      "space": "Content Metrics",
+      "validation_sql": "SELECT SUM(count) as answer FROM core_dev.techops.qa_abf_summary WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM core_dev.techops.qa_abf_summary) AND metric_type = 'monthly_review' AND status = 'DONE' AND team = 'Contractor' AND month = date_trunc('month', current_date())",
+      "check": "percentage",
+      "tolerance": 0.05,
+      "expected_table": "qa_abf_summary"
+    },
+    {
+      "id": "ops_reviews_this_month",
+      "question": "How many titles did the Ops team review this month?",
+      "space": "Content Metrics",
+      "validation_sql": "SELECT SUM(count) as answer FROM core_dev.techops.qa_abf_summary WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM core_dev.techops.qa_abf_summary) AND metric_type = 'monthly_review' AND status = 'DONE' AND team = 'Ops' AND month = date_trunc('month', current_date())",
+      "check": "percentage",
+      "tolerance": 0.05,
+      "expected_table": "qa_abf_summary"
+    },
+    {
+      "id": "total_reviews_this_month",
+      "question": "How many total QA reviews were completed this month?",
+      "space": "Content Metrics",
+      "validation_sql": "SELECT SUM(count) as answer FROM core_dev.techops.qa_abf_summary WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM core_dev.techops.qa_abf_summary) AND metric_type = 'monthly_review' AND status = 'DONE' AND team != 'System' AND month = date_trunc('month', current_date())",
+      "check": "percentage",
+      "tolerance": 0.05,
+      "expected_table": "qa_abf_summary"
+    },
+    {
+      "id": "abf_queue_size",
+      "question": "How many titles are in the ABF review queue right now?",
+      "space": "Content Metrics",
+      "validation_sql": "SELECT SUM(count) as answer FROM core_dev.techops.qa_abf_summary WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM core_dev.techops.qa_abf_summary) AND metric_type = 'current_queue' AND status = 'PENDING_REVIEW' AND team != 'System'",
+      "check": "percentage",
+      "tolerance": 0.05,
+      "expected_table": "qa_abf_summary"
+    },
+    {
+      "id": "internal_review_count",
+      "question": "How many titles are currently in internal review?",
+      "space": "Content Metrics",
+      "validation_sql": "SELECT SUM(count) as answer FROM core_dev.techops.qa_abf_summary WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM core_dev.techops.qa_abf_summary) AND metric_type = 'current_queue' AND status = 'INTERNAL_REVIEW'",
+      "check": "percentage",
+      "tolerance": 0.05,
+      "expected_table": "qa_abf_summary"
+    },
+    {
+      "id": "open_redeliveries_total",
+      "question": "How many open redeliveries are there right now?",
+      "space": "Redeliveries",
+      "validation_sql": "SELECT COUNT(*) as answer FROM core_dev.techops.redeliveries WHERE dismissed = false AND is_active_redelivery = true",
+      "check": "percentage",
+      "tolerance": 0.01,
+      "expected_table": "redeliveries"
+    },
+    {
+      "id": "open_redeliveries_by_modality",
+      "question": "How many open redeliveries are there by asset type?",
+      "space": "Redeliveries",
+      "validation_sql": "SELECT modality, COUNT(*) as count FROM core_dev.techops.redeliveries WHERE dismissed = false AND is_active_redelivery = true GROUP BY modality",
+      "check": "table_used",
+      "expected_table": "redeliveries"
+    },
+    {
+      "id": "redeliveries_created_this_week",
+      "question": "How many redeliveries were created this week?",
+      "space": "Redeliveries",
+      "validation_sql": "SELECT COUNT(*) as answer FROM core_dev.techops.redeliveries WHERE redelivery_date >= date_trunc('week', current_date())",
+      "check": "percentage",
+      "tolerance": 0.05,
+      "expected_table": "redeliveries"
+    },
+    {
+      "id": "redeliveries_top_partners",
+      "question": "Which import IDs have the most open redeliveries?",
+      "space": "Redeliveries",
+      "validation_sql": "SELECT import_id, COUNT(*) as count FROM core_dev.techops.redeliveries WHERE dismissed = false AND is_active_redelivery = true GROUP BY import_id ORDER BY count DESC LIMIT 10",
+      "check": "table_used",
+      "expected_table": "redeliveries"
+    },
+    {
+      "id": "active_partners",
+      "question": "How many active content partners do we have?",
+      "space": "Content Metrics",
+      "validation_sql": "SELECT COUNT(*) as answer FROM core_dev.techops.partner_summary WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM core_dev.techops.partner_summary) AND partner_status = 'Active'",
+      "check": "percentage",
+      "tolerance": 0.01,
+      "expected_table": "partner_summary"
+    },
+    {
+      "id": "titles_live_now",
+      "question": "How many titles are currently live on Tubi?",
+      "space": "Content Metrics",
+      "validation_sql": "SELECT COUNT(DISTINCT content_id) as answer FROM core_dev.techops.policy_window_snapshots WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM core_dev.techops.policy_window_snapshots) AND window_start <= current_date() AND window_end >= current_date() AND policy_disabled = false",
+      "check": "percentage",
+      "tolerance": 0.05,
+      "expected_table": "policy_window_snapshots"
+    },
+    {
+      "id": "titles_expiring_this_month",
+      "question": "How many titles are expiring this month?",
+      "space": "Content Metrics",
+      "validation_sql": "SELECT COUNT(DISTINCT content_id) as answer FROM core_dev.techops.policy_window_snapshots WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM core_dev.techops.policy_window_snapshots) AND window_end >= date_trunc('month', current_date()) AND window_end < dateadd(MONTH, 1, date_trunc('month', current_date())) AND policy_disabled = false",
+      "check": "percentage",
+      "tolerance": 0.10,
+      "expected_table": "policy_window_snapshots"
+    },
+    {
+      "id": "reviews_by_team_last_month",
+      "question": "How many reviews did each team complete last month?",
+      "space": "Content Metrics",
+      "validation_sql": "SELECT team, SUM(count) as total FROM core_dev.techops.qa_abf_summary WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM core_dev.techops.qa_abf_summary) AND metric_type = 'monthly_review' AND status = 'DONE' AND month = date_trunc('month', dateadd(MONTH, -1, current_date())) GROUP BY team",
+      "check": "table_used",
+      "expected_table": "qa_abf_summary"
+    },
+    {
+      "id": "redeliveries_video_open",
+      "question": "How many open video redeliveries are there?",
+      "space": "Redeliveries",
+      "validation_sql": "SELECT COUNT(*) as answer FROM core_dev.techops.redeliveries WHERE dismissed = false AND is_active_redelivery = true AND modality = 'video'",
+      "check": "percentage",
+      "tolerance": 0.01,
+      "expected_table": "redeliveries"
+    },
+    {
+      "id": "redeliveries_subtitle_open",
+      "question": "How many open subtitle redeliveries are there?",
+      "space": "Redeliveries",
+      "validation_sql": "SELECT COUNT(*) as answer FROM core_dev.techops.redeliveries WHERE dismissed = false AND is_active_redelivery = true AND modality = 'subtitle'",
+      "check": "percentage",
+      "tolerance": 0.01,
+      "expected_table": "redeliveries"
+    },
+    {
+      "id": "imports_trend_3_months",
+      "question": "What is the import trend over the last 3 months?",
+      "space": "Content Metrics",
+      "validation_sql": "SELECT month, SUM(count) as total FROM core_dev.techops.imported_titles_monthly WHERE month >= dateadd(MONTH, -3, date_trunc('month', current_date())) GROUP BY month ORDER BY month",
+      "check": "table_used",
+      "expected_table": "imported_titles_monthly"
+    },
+    {
+      "id": "titles_with_open_redelivery",
+      "question": "How many distinct content IDs have an open redelivery?",
+      "space": "Redeliveries",
+      "validation_sql": "SELECT COUNT(DISTINCT content_id) as answer FROM core_dev.techops.redeliveries WHERE dismissed = false AND is_active_redelivery = true",
+      "check": "percentage",
+      "tolerance": 0.05,
+      "expected_table": "redeliveries"
+    },
+    {
+      "id": "avails_by_status",
+      "question": "What is the breakdown of avails by current status?",
+      "space": "Content Metrics",
+      "validation_sql": "SELECT avail_status, COUNT(*) as count FROM core_dev.techops.avails_status_snapshot WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM core_dev.techops.avails_status_snapshot) GROUP BY avail_status ORDER BY count DESC",
+      "check": "table_used",
+      "expected_table": "avails_status_snapshot"
+    },
+    {
+      "id": "system_reviews_this_month",
+      "question": "How many reviews were done by the system automatically this month?",
+      "space": "Content Metrics",
+      "validation_sql": "SELECT COALESCE(SUM(count), 0) as answer FROM core_dev.techops.qa_abf_summary WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM core_dev.techops.qa_abf_summary) AND metric_type = 'monthly_review' AND status = 'DONE' AND team = 'System' AND month = date_trunc('month', current_date())",
+      "check": "percentage",
+      "tolerance": 0.05,
+      "expected_table": "qa_abf_summary"
+    },
+    {
+      "id": "redeliveries_dismissed_this_month",
+      "question": "How many redeliveries were dismissed this month?",
+      "space": "Redeliveries",
+      "validation_sql": "SELECT COUNT(*) as answer FROM core_dev.techops.redeliveries WHERE dismissed = true AND last_updated >= date_trunc('month', current_date())",
+      "check": "table_used",
+      "tolerance": 0.0,
+      "expected_table": "redeliveries"
+    },
+    {
+      "id": "content_refresh_published",
+      "question": "How many titles in the content refresh pipeline have been published?",
+      "space": "Content Metrics",
+      "validation_sql": "SELECT COUNT(*) as answer FROM core_dev.techops.content_refresh_status WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM core_dev.techops.content_refresh_status) AND overall_status = 'TITLE_STATUS_PUBLISHED'",
+      "check": "percentage",
+      "tolerance": 0.05,
+      "expected_table": "content_refresh_status"
+    },
+    {
+      "id": "content_refresh_in_progress",
+      "question": "How many titles are currently in progress in the content refresh pipeline?",
+      "space": "Content Metrics",
+      "validation_sql": "SELECT COUNT(*) as answer FROM core_dev.techops.content_refresh_status WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM core_dev.techops.content_refresh_status) AND overall_status = 'TITLE_STATUS_IN_PROGRESS'",
+      "check": "percentage",
+      "tolerance": 0.05,
+      "expected_table": "content_refresh_status"
+    },
+    {
+      "id": "content_refresh_blocked",
+      "question": "How many titles are blocked in the content refresh pipeline?",
+      "space": "Content Metrics",
+      "validation_sql": "SELECT COUNT(*) as answer FROM core_dev.techops.content_refresh_status WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM core_dev.techops.content_refresh_status) AND overall_status = 'TITLE_STATUS_BLOCKED'",
+      "check": "percentage",
+      "tolerance": 0.05,
+      "expected_table": "content_refresh_status"
+    },
+    {
+      "id": "content_refresh_ready_to_publish",
+      "question": "How many titles are ready to publish in the content refresh pipeline?",
+      "space": "Content Metrics",
+      "validation_sql": "SELECT COUNT(*) as answer FROM core_dev.techops.content_refresh_status WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM core_dev.techops.content_refresh_status) AND overall_status = 'TITLE_STATUS_READY_TO_PUBLISH'",
+      "check": "percentage",
+      "tolerance": 0.05,
+      "expected_table": "content_refresh_status"
+    },
+    {
+      "id": "content_refresh_by_status",
+      "question": "What is the breakdown of titles by status in the content refresh pipeline?",
+      "space": "Content Metrics",
+      "validation_sql": "SELECT overall_status, COUNT(*) as count FROM core_dev.techops.content_refresh_status WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM core_dev.techops.content_refresh_status) GROUP BY overall_status ORDER BY count DESC",
+      "check": "table_used",
+      "expected_table": "content_refresh_status"
+    },
+    {
+      "id": "content_refresh_with_open_redeliveries",
+      "question": "How many titles in the content refresh status have an open_redelivery_count greater than zero?",
+      "space": "Content Metrics",
+      "validation_sql": "SELECT COUNT(*) as answer FROM core_dev.techops.content_refresh_status WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM core_dev.techops.content_refresh_status) AND open_redelivery_count > 0",
+      "check": "percentage",
+      "tolerance": 0.05,
+      "expected_table": "content_refresh_status"
+    },
+    {
+      "id": "content_refresh_abf_complete",
+      "question": "How many titles in the content refresh have completed ABF?",
+      "space": "Content Metrics",
+      "validation_sql": "SELECT COUNT(*) as answer FROM core_dev.techops.content_refresh_status WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM core_dev.techops.content_refresh_status) AND abf_complete = true",
+      "check": "percentage",
+      "tolerance": 0.05,
+      "expected_table": "content_refresh_status"
+    },
+    {
+      "id": "partners_workload_top_pending",
+      "question": "Which partners have the most avails pending review according to the weekly workload?",
+      "space": "Content Metrics",
+      "validation_sql": "SELECT import_id, avails_pending_review FROM core_dev.techops.ops_weekly_workload WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM core_dev.techops.ops_weekly_workload) ORDER BY avails_pending_review DESC LIMIT 10",
+      "check": "table_used",
+      "expected_table": "ops_weekly_workload"
+    },
+    {
+      "id": "partners_workload_total_pending",
+      "question": "What is the total number of avails pending review across all partners?",
+      "space": "Content Metrics",
+      "validation_sql": "SELECT SUM(avails_pending_review) as answer FROM core_dev.techops.ops_weekly_workload WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM core_dev.techops.ops_weekly_workload)",
+      "check": "percentage",
+      "tolerance": 0.05,
+      "expected_table": "ops_weekly_workload"
+    },
+    {
+      "id": "partners_files_received_7d",
+      "question": "How many files were received in the last 7 days across all partners?",
+      "space": "Content Metrics",
+      "validation_sql": "SELECT SUM(files_received_7d) as answer FROM core_dev.techops.ops_weekly_workload WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM core_dev.techops.ops_weekly_workload)",
+      "check": "percentage",
+      "tolerance": 0.10,
+      "expected_table": "ops_weekly_workload"
+    },
+    {
+      "id": "partners_new_this_month",
+      "question": "How many new partners were added this month?",
+      "space": "Content Metrics",
+      "validation_sql": "SELECT COUNT(*) as answer FROM core_dev.techops.partner_summary WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM core_dev.techops.partner_summary) AND is_new_this_month = true",
+      "check": "percentage",
+      "tolerance": 0.05,
+      "expected_table": "partner_summary"
+    },
+    {
+      "id": "partners_priority_count",
+      "question": "How many priority partners do we have?",
+      "space": "Content Metrics",
+      "validation_sql": "SELECT COUNT(*) as answer FROM core_dev.techops.partner_summary WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM core_dev.techops.partner_summary) AND is_priority_partner = true",
+      "check": "percentage",
+      "tolerance": 0.05,
+      "expected_table": "partner_summary"
+    },
+    {
+      "id": "partners_by_type",
+      "question": "What is the breakdown of partners by type?",
+      "space": "Content Metrics",
+      "validation_sql": "SELECT type, COUNT(*) as count FROM core_dev.techops.partner_summary WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM core_dev.techops.partner_summary) GROUP BY type ORDER BY count DESC",
+      "check": "table_used",
+      "expected_table": "partner_summary"
+    },
+    {
+      "id": "partner_title_status_no_content_id",
+      "question": "How many avails are missing a content ID?",
+      "space": "Content Metrics",
+      "validation_sql": "SELECT COUNT(*) as answer FROM core_dev.techops.partner_title_status WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM core_dev.techops.partner_title_status) AND has_content_id = false",
+      "check": "percentage",
+      "tolerance": 0.10,
+      "expected_table": "partner_title_status"
+    },
+    {
+      "id": "image_deliveries_today",
+      "question": "How many image deliveries were received today?",
+      "space": "Content Metrics",
+      "validation_sql": "SELECT COALESCE(SUM(count), 0) as answer FROM core_dev.techops.image_deliveries WHERE delivery_date = current_date()",
+      "check": "percentage",
+      "tolerance": 0.10,
+      "expected_table": "image_deliveries"
+    },
+    {
+      "id": "image_deliveries_this_week",
+      "question": "How many image deliveries were received this week?",
+      "space": "Content Metrics",
+      "validation_sql": "SELECT COALESCE(SUM(count), 0) as answer FROM core_dev.techops.image_deliveries WHERE delivery_date >= date_trunc('week', current_date())",
+      "check": "percentage",
+      "tolerance": 0.10,
+      "expected_table": "image_deliveries"
+    },
+    {
+      "id": "image_deliveries_by_provider",
+      "question": "Which providers sent the most image deliveries this month?",
+      "space": "Content Metrics",
+      "validation_sql": "SELECT provider, SUM(count) as total FROM core_dev.techops.image_deliveries WHERE delivery_date >= date_trunc('month', current_date()) GROUP BY provider ORDER BY total DESC LIMIT 10",
+      "check": "table_used",
+      "expected_table": "image_deliveries"
+    },
+    {
+      "id": "titles_went_live_this_month",
+      "question": "How many titles went live for the first time this month?",
+      "space": "Content Metrics",
+      "validation_sql": "SELECT COUNT(*) as answer FROM core_dev.techops.content_first_live WHERE first_time_set_live >= date_trunc('month', current_date())",
+      "check": "percentage",
+      "tolerance": 0.15,
+      "expected_table": "content_first_live"
+    },
+    {
+      "id": "policy_windows_disabled",
+      "question": "How many titles have disabled policy windows?",
+      "space": "Content Metrics",
+      "validation_sql": "SELECT COUNT(DISTINCT content_id) as answer FROM core_dev.techops.policy_window_snapshots WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM core_dev.techops.policy_window_snapshots) AND policy_disabled = true",
+      "check": "percentage",
+      "tolerance": 0.10,
+      "expected_table": "policy_window_snapshots"
+    },
+    {
+      "id": "partner_last_active_stale",
+      "question": "How many partners have not received any files in the last 30 days?",
+      "space": "Content Metrics",
+      "validation_sql": "SELECT COUNT(*) as answer FROM core_dev.techops.partner_last_active WHERE last_file_received < dateadd(DAY, -30, current_date())",
+      "check": "table_used",
+      "expected_table": "partner_last_active"
+    },
+    {
+      "id": "redelivery_weekly_trend",
+      "question": "What is the redelivery creation trend over the last 4 weeks?",
+      "space": "Content Metrics",
+      "validation_sql": "SELECT week_start, redelivery_created_count FROM core_dev.techops.redelivery_weekly WHERE week_start >= dateadd(WEEK, -4, date_trunc('week', current_date())) ORDER BY week_start",
+      "check": "table_used",
+      "expected_table": "redelivery_weekly"
+    },
+    {
+      "id": "redeliveries_by_reason",
+      "question": "What are the most common redelivery reasons for open redeliveries?",
+      "space": "Redeliveries",
+      "validation_sql": "SELECT redelivery_reason, COUNT(*) as count FROM core_dev.techops.redeliveries WHERE dismissed = false AND is_active_redelivery = true GROUP BY redelivery_reason ORDER BY count DESC LIMIT 10",
+      "check": "table_used",
+      "expected_table": "redeliveries"
+    },
+    {
+      "id": "redeliveries_by_qa_status",
+      "question": "What is the breakdown of open redeliveries by QA status?",
+      "space": "Redeliveries",
+      "validation_sql": "SELECT qa_status, COUNT(*) as count FROM core_dev.techops.redeliveries WHERE dismissed = false AND is_active_redelivery = true GROUP BY qa_status ORDER BY count DESC",
+      "check": "table_used",
+      "expected_table": "redeliveries"
+    },
+    {
+      "id": "redeliveries_properly_redelivered",
+      "question": "How many open redeliveries have been properly redelivered?",
+      "space": "Redeliveries",
+      "validation_sql": "SELECT COUNT(*) as answer FROM core_dev.techops.redeliveries WHERE dismissed = false AND is_active_redelivery = true AND is_properly_redelivered = true",
+      "check": "percentage",
+      "tolerance": 0.05,
+      "expected_table": "redeliveries"
+    },
+    {
+      "id": "ops_workload_unexpected_deliveries",
+      "question": "Which partners have the most unexpected deliveries in the weekly workload snapshot?",
+      "space": "Content Metrics",
+      "validation_sql": "SELECT import_id, avails_unexpected_delivery FROM core_dev.techops.ops_weekly_workload WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM core_dev.techops.ops_weekly_workload) AND avails_unexpected_delivery > 0 ORDER BY avails_unexpected_delivery DESC LIMIT 10",
+      "check": "table_used",
+      "expected_table": "ops_weekly_workload"
+    },
+    {
+      "id": "partner_highest_error_rate",
+      "question": "Which partners have the highest error rate?",
+      "space": "Partner Detail",
+      "validation_sql": "SELECT import_id, error_rate_pct FROM core_dev.techops.partner_health WHERE total_files_90d > 100 ORDER BY error_rate_pct DESC LIMIT 10",
+      "check": "table_used",
+      "expected_table": "partner_health"
+    },
+    {
+      "id": "partner_priority_most_issues",
+      "question": "Which priority partners have the most issues?",
+      "space": "Partner Detail",
+      "validation_sql": "SELECT import_id, name, total_issues_90d FROM core_dev.techops.partner_health WHERE is_priority_partner = true ORDER BY total_issues_90d DESC LIMIT 10",
+      "check": "table_used",
+      "expected_table": "partner_health"
+    },
+    {
+      "id": "partner_sony_abf_errors",
+      "question": "How many ABF errors does Sony Pictures have?",
+      "space": "Partner Detail",
+      "validation_sql": "SELECT abf_error_count FROM core_dev.techops.partner_health WHERE LOWER(import_id) = 'sony-pictures'",
+      "check": "percentage",
+      "tolerance": 0.05,
+      "expected_table": "partner_health"
+    },
+    {
+      "id": "partner_paramount_redeliveries",
+      "question": "How many redeliveries does Paramount have?",
+      "space": "Partner Detail",
+      "validation_sql": "SELECT redelivery_count FROM core_dev.techops.partner_health WHERE LOWER(import_id) = 'paramount'",
+      "check": "percentage",
+      "tolerance": 0.05,
+      "expected_table": "partner_health"
+    },
+    {
+      "id": "partner_nbcu_video_redeliveries",
+      "question": "How many video redeliveries does NBCU have?",
+      "space": "Partner Detail",
+      "validation_sql": "SELECT redeliv_video FROM core_dev.techops.partner_health WHERE LOWER(import_id) = 'nbcu'",
+      "check": "percentage",
+      "tolerance": 0.05,
+      "expected_table": "partner_health"
+    },
+    {
+      "id": "partner_issues_paramount_titles",
+      "question": "List titles with video redeliveries for Paramount",
+      "space": "Partner Detail",
+      "validation_sql": "SELECT title, reason FROM core_dev.techops.partner_issues WHERE LOWER(import_id) = 'paramount' AND issue_type = 'redelivery' AND modality = 'video' AND title IS NOT NULL LIMIT 50",
+      "check": "table_used",
+      "expected_table": "partner_issues"
+    },
+    {
+      "id": "partner_pipeline_failures_top",
+      "question": "Which partners have the most pipeline failures?",
+      "space": "Partner Detail",
+      "validation_sql": "SELECT import_id, pipeline_failure_count FROM core_dev.techops.partner_health WHERE pipeline_failure_count > 0 ORDER BY pipeline_failure_count DESC LIMIT 10",
+      "check": "table_used",
+      "expected_table": "partner_health"
+    },
+    {
+      "id": "partner_inactive_30d",
+      "question": "Which partners have not received files in the last 30 days?",
+      "space": "Partner Detail",
+      "validation_sql": "SELECT import_id, last_file_received FROM core_dev.techops.partner_last_active WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM core_dev.techops.partner_last_active) AND last_file_received < DATE_SUB(CURRENT_DATE, 30)",
+      "check": "table_used",
+      "expected_table": "partner_last_active"
+    },
+    {
+      "id": "partner_total_issues_count",
+      "question": "How many total partner issues are there across all partners?",
+      "space": "Partner Detail",
+      "validation_sql": "SELECT SUM(total_issues_90d) FROM core_dev.techops.partner_health",
+      "check": "percentage",
+      "tolerance": 0.05,
+      "expected_table": "partner_health"
+    },
+    {
+      "id": "partner_lionsgate_top_reason",
+      "question": "What is the most common redelivery reason for Lionsgate?",
+      "space": "Partner Detail",
+      "validation_sql": "SELECT reason, COUNT(*) as cnt FROM core_dev.techops.partner_issues WHERE LOWER(import_id) = 'lionsgate' AND issue_type = 'redelivery' GROUP BY reason ORDER BY cnt DESC LIMIT 5",
+      "check": "table_used",
+      "expected_table": "partner_issues"
+    },
+    {
+      "id": "partner_poc_sony",
+      "question": "Who is the point of contact for Sony Pictures?",
+      "space": "Partner Detail",
+      "validation_sql": "SELECT pops_poc, cops_poc FROM core_dev.techops.partner_summary WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM core_dev.techops.partner_summary) AND LOWER(import_id) = 'sony-pictures'",
+      "check": "table_used",
+      "expected_table": "partner_summary"
+    },
+    {
+      "id": "partner_avails_pending_paramount",
+      "question": "How many avails does Paramount have in pending review?",
+      "space": "Partner Detail",
+      "validation_sql": "SELECT COUNT(*) FROM core_dev.techops.partner_title_status WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM core_dev.techops.partner_title_status) AND LOWER(import_id) = 'paramount' AND avail_status = 'pending_review'",
+      "check": "percentage",
+      "tolerance": 0.05,
+      "expected_table": "partner_title_status"
+    }
+  ]
+}

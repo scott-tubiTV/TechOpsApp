@@ -60,6 +60,12 @@ GENIE_SPACES = {
         "keywords": ["dupe", "duplicate", "conflict", "csv", "upload", "check", "avails file", "overlap", "territory"],
         "color": "#f472b6",
     },
+    "Partner Detail": {
+        "id": os.environ.get("GENIE_SPACE_PARTNER_DETAIL", "01f1912d11a91341b59b2836ca3777c6"),
+        "description": "Per-partner health: error rates, redeliveries, pipeline failures, ABF errors, POC info",
+        "keywords": ["partner", "error rate", "sony", "paramount", "nbcu", "lionsgate", "redelivery reason", "pipeline failure", "abf error", "poc", "priority partner", "inactive", "health"],
+        "color": "#10b981",
+    },
 }
 
 SUGGESTION_CARDS = [
