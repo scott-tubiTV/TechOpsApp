@@ -289,10 +289,15 @@ def _audit_pair(pair, dry_run):
             if "snapshot_date" not in sql_lower:
                 issues.append(f"No snapshot_date filter on '{table}'")
 
-    # Check 3: Unquoted date_trunc
-    if DATE_TRUNC_PATTERN in sql_lower.replace("'", "").replace('"', ''):
-        if "date_trunc('month'" not in sql_lower and 'date_trunc("month"' not in sql_lower:
-            issues.append("Unquoted date_trunc(month, ...) — causes UNRESOLVED_COLUMN errors")
+    # Check 3: Unquoted date_trunc — only flag if neither single nor double quotes present
+    if "date_trunc(" in sql_lower:
+        import re
+        trunc_calls = re.findall(r"date_trunc\(\s*([^,)]+)", sql_lower)
+        for arg in trunc_calls:
+            arg_stripped = arg.strip()
+            if not (arg_stripped.startswith("'") or arg_stripped.startswith('"')):
+                issues.append("Unquoted date_trunc(month, ...) — causes UNRESOLVED_COLUMN errors")
+                break
 
     # Check 4: snapshot_date >= instead of = MAX
     if "snapshot_date >=" in sql_lower and "max(snapshot_date)" not in sql_lower:

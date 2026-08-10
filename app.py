@@ -51,7 +51,7 @@ GENIE_SPACES = {
     "Redeliveries": {
         "id": os.environ.get("GENIE_SPACE_REDELIVERIES", "01f18b97de2f122eb27a1b307d68e50e"),
         "description": "Redelivery detail: per-title breakdown by reason, modality, age, partner, and dismissal status",
-        "keywords": ["redelivery", "redeliver", "dismissed", "modality", "video file", "subtitle file", "image file", "overdue", "backlog", "oldest", "reason", "open redeliveries", "partner"],
+        "keywords": ["redelivery", "redeliver", "dismissed", "modality", "video file", "subtitle file", "image file", "overdue", "backlog", "oldest", "reason", "open redeliveries"],
         "color": "#f59e0b",
     },
     "Dupe Checker V2": {
@@ -63,7 +63,7 @@ GENIE_SPACES = {
     "Partner Detail": {
         "id": os.environ.get("GENIE_SPACE_PARTNER_DETAIL", "01f1912d11a91341b59b2836ca3777c6"),
         "description": "Per-partner health: error rates, redeliveries, pipeline failures, ABF errors, POC info",
-        "keywords": ["partner", "error rate", "sony", "paramount", "nbcu", "lionsgate", "redelivery reason", "pipeline failure", "abf error", "poc", "priority partner", "inactive", "health"],
+        "keywords": ["partner", "error rate", "sony", "paramount", "nbcu", "lionsgate", "endemol", "all3", "shout", "redelivery reason", "pipeline failure", "abf error", "poc", "priority partner", "inactive", "health", "which partners", "partner error", "partner issue", "partner redeliveries", "overdue"],
         "color": "#10b981",
     },
 }
