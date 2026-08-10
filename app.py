@@ -26,6 +26,7 @@ TOOL_USERS = [
     "marianladiona@tubi.tv",
     "jhudson@tubi.tv",
     "james@tubi.tv",
+    "mmaynez@tubi.tv",
 ]
 
 TOOLS = {
