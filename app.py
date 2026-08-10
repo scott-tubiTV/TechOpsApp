@@ -70,10 +70,10 @@ GENIE_SPACES = {
 }
 
 SUGGESTION_CARDS = [
-    "Show ops workload breakdown this week",
-    "How many avails are pending review?",
-    "Partner summary by title count",
-    "Which partners have the most overdue redeliveries?",
+    "How many new avails were created this month by content type?",
+    "How many open redeliveries are there by asset type?",
+    "Which partners have the highest error rate?",
+    "How many titles are in the ABF review queue right now?",
 ]
 
 st.set_page_config(
