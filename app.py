@@ -32,6 +32,10 @@ TOOL_USERS = [
     "jhudson@tubi.tv",
     "james@tubi.tv",
     "mmaynez@tubi.tv",
+    "hfong@tubi.tv",
+    "lgumawid@tubi.tv",
+    "rramirez@tubi.tv",
+    "aandrewsprince@tubi.tv",
 ]
 
 TOOLS = {
