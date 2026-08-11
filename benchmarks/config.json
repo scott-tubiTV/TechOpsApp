@@ -617,7 +617,7 @@
       "id": "content_library_missing_video",
       "question": "How many titles are missing video assets?",
       "space": "Content Library",
-      "validation_sql": "SELECT COUNT(*) as answer FROM core_dev.techops.content_library WHERE has_video = false AND delivery_active = true",
+      "validation_sql": "SELECT COUNT(*) as answer FROM core_dev.techops.content_library WHERE has_video = false",
       "check": "percentage",
       "tolerance": 0.10,
       "expected_table": "content_library"
@@ -640,9 +640,9 @@
     },
     {
       "id": "content_library_never_live",
-      "question": "How many active titles have never gone live?",
+      "question": "How many titles have never gone live?",
       "space": "Content Library",
-      "validation_sql": "SELECT COUNT(*) as answer FROM core_dev.techops.content_library WHERE first_live_date IS NULL AND delivery_active = true",
+      "validation_sql": "SELECT COUNT(*) as answer FROM core_dev.techops.content_library WHERE first_live_date IS NULL",
       "check": "percentage",
       "tolerance": 0.10,
       "expected_table": "content_library"
