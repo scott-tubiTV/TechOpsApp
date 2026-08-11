@@ -20,6 +20,7 @@ from conversation_store import (
 from tools.sony_matcher import render_content_id_matcher
 from tools.imdb_dupe_checker import render_imdb_dupe_checker
 from tools.genie_benchmark import render_genie_benchmark
+from saved_queries_tab import render_saved_queries_tab
 
 ADMIN_EMAILS = [
     "swhitney@tubi.tv",
@@ -48,6 +49,11 @@ TOOLS = {
         "icon": "🎬",
         "description": "Find IMDB IDs, detect duplicates, and check policy conflicts",
         "renderer": render_imdb_dupe_checker,
+    },
+    "Reports": {
+        "icon": "📊",
+        "description": "Saved queries and dashboard metrics you can refresh on demand",
+        "renderer": render_saved_queries_tab,
     },
 }
 
@@ -856,6 +862,42 @@ def _render_chat(prompt=None, user_email=None):
             if msg.get("sql"):
                 with st.expander("View generated SQL"):
                     st.code(msg["sql"], language="sql")
+
+            if msg.get("sql") and msg.get("dataframe") is not None and has_tool_access(user_email):
+                save_key = f"save_report_{i}"
+                if st.session_state.get(save_key) == "form":
+                    with st.form(key=f"save_report_form_{i}"):
+                        sr_title = st.text_input("Report title", value=st.session_state.messages[i - 1]["content"][:60] if i > 0 else "")
+                        sr_desc = st.text_input("Description (optional)")
+                        sr_display = st.selectbox("Display type", ["table", "metric", "bar_chart", "line_chart", "pie_chart"])
+                        sr_col1, sr_col2 = st.columns(2)
+                        with sr_col1:
+                            sr_submitted = st.form_submit_button("Save", use_container_width=True)
+                        with sr_col2:
+                            sr_cancelled = st.form_submit_button("Cancel", use_container_width=True)
+                        if sr_submitted and sr_title:
+                            from saved_queries_store import save_query as _save_q
+                            prompt_text = st.session_state.messages[i - 1]["content"] if i > 0 else None
+                            _save_q(
+                                user_email=user_email,
+                                title=sr_title,
+                                sql_text=msg["sql"],
+                                display_type=sr_display,
+                                description=sr_desc,
+                                original_prompt=prompt_text,
+                                genie_space=msg.get("routed_to") or msg.get("_space"),
+                            )
+                            st.session_state[save_key] = "saved"
+                            st.rerun()
+                        if sr_cancelled:
+                            st.session_state.pop(save_key, None)
+                            st.rerun()
+                elif st.session_state.get(save_key) == "saved":
+                    st.caption("Saved to Reports.")
+                else:
+                    if st.button("📊 Save as Report", key=f"save_btn_{i}"):
+                        st.session_state[save_key] = "form"
+                        st.rerun()
 
             if msg.get("suggestions"):
                 st.caption("**Suggested questions:**")
