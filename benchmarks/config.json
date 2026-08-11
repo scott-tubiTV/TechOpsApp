@@ -8,6 +8,9 @@
     },
     "Partner Detail": {
       "id": "01f1912d11a91341b59b2836ca3777c6"
+    },
+    "Content Library": {
+      "id": "01f1951ff07e199aa6d9c0718f342e35"
     }
   },
   "warehouse_id": "a6b9541289d75c6e",
@@ -555,6 +558,94 @@
       "check": "percentage",
       "tolerance": 0.05,
       "expected_table": "partner_title_status"
+    },
+    {
+      "id": "content_library_live_creator",
+      "question": "How many live creator_content titles are there?",
+      "space": "Content Library",
+      "validation_sql": "SELECT COUNT(*) as answer FROM core_dev.techops.content_library WHERE is_live = true AND is_creator_content = true",
+      "check": "percentage",
+      "tolerance": 0.05,
+      "expected_table": "content_library"
+    },
+    {
+      "id": "content_library_total_titles",
+      "question": "How many total titles are in the content library?",
+      "space": "Content Library",
+      "validation_sql": "SELECT COUNT(*) as answer FROM core_dev.techops.content_library",
+      "check": "percentage",
+      "tolerance": 0.01,
+      "expected_table": "content_library"
+    },
+    {
+      "id": "content_library_tubi_originals",
+      "question": "How many Tubi Original titles are there?",
+      "space": "Content Library",
+      "validation_sql": "SELECT COUNT(*) as answer FROM core_dev.techops.content_library WHERE is_tubi_original = true",
+      "check": "percentage",
+      "tolerance": 0.05,
+      "expected_table": "content_library"
+    },
+    {
+      "id": "content_library_live_movies",
+      "question": "How many live movies are currently on Tubi?",
+      "space": "Content Library",
+      "validation_sql": "SELECT COUNT(*) as answer FROM core_dev.techops.content_library WHERE is_live = true AND content_type = 'MOVIE'",
+      "check": "percentage",
+      "tolerance": 0.05,
+      "expected_table": "content_library"
+    },
+    {
+      "id": "content_library_partner_lionsgate",
+      "question": "How many titles does Lionsgate have in the content library?",
+      "space": "Content Library",
+      "validation_sql": "SELECT COUNT(*) as answer FROM core_dev.techops.content_library WHERE partner = 'lionsgate'",
+      "check": "percentage",
+      "tolerance": 0.05,
+      "expected_table": "content_library"
+    },
+    {
+      "id": "content_library_same_day_live",
+      "question": "How many same_day_content titles are currently live?",
+      "space": "Content Library",
+      "validation_sql": "SELECT COUNT(*) as answer FROM core_dev.techops.content_library WHERE is_same_day_content = true AND is_live = true",
+      "check": "percentage",
+      "tolerance": 0.05,
+      "expected_table": "content_library"
+    },
+    {
+      "id": "content_library_missing_video",
+      "question": "How many titles are missing video assets?",
+      "space": "Content Library",
+      "validation_sql": "SELECT COUNT(*) as answer FROM core_dev.techops.content_library WHERE has_video = false AND delivery_active = true",
+      "check": "percentage",
+      "tolerance": 0.10,
+      "expected_table": "content_library"
+    },
+    {
+      "id": "content_library_by_content_type",
+      "question": "What is the breakdown of titles by content type?",
+      "space": "Content Library",
+      "validation_sql": "SELECT content_type, COUNT(*) as count FROM core_dev.techops.content_library GROUP BY content_type ORDER BY count DESC",
+      "check": "table_used",
+      "expected_table": "content_library"
+    },
+    {
+      "id": "content_library_open_redeliveries",
+      "question": "Which titles have the most open redeliveries in the content library?",
+      "space": "Content Library",
+      "validation_sql": "SELECT content_id, title, open_redeliveries FROM core_dev.techops.content_library WHERE open_redeliveries > 0 ORDER BY open_redeliveries DESC LIMIT 10",
+      "check": "table_used",
+      "expected_table": "content_library"
+    },
+    {
+      "id": "content_library_never_live",
+      "question": "How many active titles have never gone live?",
+      "space": "Content Library",
+      "validation_sql": "SELECT COUNT(*) as answer FROM core_dev.techops.content_library WHERE first_live_date IS NULL AND delivery_active = true",
+      "check": "percentage",
+      "tolerance": 0.10,
+      "expected_table": "content_library"
     }
   ]
 }

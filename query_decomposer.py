@@ -13,6 +13,7 @@ SYSTEM_PROMPT = """You are a query router for a data analytics system. You have 
 2. Redeliveries — Redelivery detail: per-title breakdown by reason, modality (video/image/subtitle), age, partner, dismissal status. Questions about redeliveries in general, overdue, backlog, dismissed, open redeliveries across the board.
 3. Dupe Checker V2 — Duplicate title detection: CSV avails checking for existing titles and conflicts. Questions about dupes, duplicates, conflicts, overlapping titles, territory overlap.
 4. Partner Detail — Per-partner health: error rates, redeliveries by partner, pipeline failures, ABF errors, POC info. Questions about specific partners (Sony, Paramount, NBCU, Lionsgate, etc.), partner error rates, partner health, which partners have issues.
+5. Content Library — Per-title metadata lookup: individual title info by name, content type, partner, internal tags (creator_content, same_day_content, tubi_original), live status, policy windows, genres, assets. Questions about specific titles, looking up a title, which titles have a tag, is a title live, what partner owns a title.
 
 Given a user question, determine:
 - Is this a SINGLE-space question (can be fully answered by one space)?
@@ -30,11 +31,13 @@ Respond ONLY with valid JSON in this exact format:
 Rules:
 - If the question mentions a specific partner by name AND asks about their health/errors/issues, route to "Partner Detail".
 - If the question asks about redeliveries in general (across all partners, or by modality/reason), route to "Redeliveries".
+- If the question asks about specific titles, title-level metadata, internal tags, or wants to look up/find individual titles, route to "Content Library".
+- If the question asks about aggregate counts/trends (how many titles imported this month, queue sizes), route to "Content Metrics".
 - If the question combines partner-specific data with general metrics or general redelivery data, it's MULTI-space.
 - When splitting a multi-space question, each sub_query must be self-contained and answerable by its target space alone.
 - Never route to more than 3 spaces for a single question.
 - If unsure, prefer single-space routing.
-- The space_name must be exactly one of: "Content Metrics", "Redeliveries", "Dupe Checker V2", "Partner Detail"."""
+- The space_name must be exactly one of: "Content Metrics", "Redeliveries", "Dupe Checker V2", "Partner Detail", "Content Library"."""
 
 
 @dataclass
@@ -72,7 +75,7 @@ class QueryDecomposer:
             cleaned = cleaned.strip()
 
         data = json.loads(cleaned)
-        valid_spaces = {"Content Metrics", "Redeliveries", "Dupe Checker V2", "Partner Detail"}
+        valid_spaces = {"Content Metrics", "Redeliveries", "Dupe Checker V2", "Partner Detail", "Content Library"}
 
         sub_queries = []
         for space in data.get("spaces", []):

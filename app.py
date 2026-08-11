@@ -72,6 +72,12 @@ GENIE_SPACES = {
         "keywords": ["partner", "error rate", "sony", "paramount", "nbcu", "lionsgate", "endemol", "all3", "shout", "redelivery reason", "pipeline failure", "abf error", "poc", "priority partner", "inactive", "health", "which partners", "partner error", "partner issue", "partner redeliveries", "overdue"],
         "color": "#10b981",
     },
+    "Content Library": {
+        "id": os.environ.get("GENIE_SPACE_CONTENT_LIBRARY", "01f1951ff07e199aa6d9c0718f342e35"),
+        "description": "Per-title metadata: look up individual titles by name, partner, content type, internal tags, live status, policy windows",
+        "keywords": ["title", "movie", "series", "episode", "creator_content", "same_day", "tubi_original", "live", "is live", "policy window", "genre", "imdb", "release year", "which titles", "find title", "look up", "content_id", "asset status", "has video", "has subtitles"],
+        "color": "#06b6d4",
+    },
 }
 
 SUGGESTION_CARDS = [
