@@ -701,13 +701,21 @@ def _render_verification_wizard(verify_indices, match_results, requests):
     completed = total_to_verify - len(unresolved)
 
     if not unresolved:
-        st.markdown(f"""
-        <div style="background:#ecfdf5; border:1px solid #a7f3d0; border-radius:12px; padding:12px 16px; margin:12px 0;">
-            <span style="font-size:14px; color:#065f46; font-weight:600;">
-                ✓ All {total_to_verify} verification{'s' if total_to_verify > 1 else ''} complete
-            </span>
-        </div>
-        """, unsafe_allow_html=True)
+        col_done, col_back = st.columns([5, 1])
+        with col_done:
+            st.markdown(f"""
+            <div style="background:#ecfdf5; border:1px solid #a7f3d0; border-radius:12px; padding:12px 16px; margin:12px 0;">
+                <span style="font-size:14px; color:#065f46; font-weight:600;">
+                    ✓ All {total_to_verify} verification{'s' if total_to_verify > 1 else ''} complete
+                </span>
+            </div>
+            """, unsafe_allow_html=True)
+        with col_back:
+            if completed > 0:
+                st.markdown("<div style='margin-top:12px;'></div>", unsafe_allow_html=True)
+                if st.button("← Undo Last", key="verify_goback_done", use_container_width=True):
+                    _undo_last_verification(verify_indices, decisions, match_results, requests)
+                    st.rerun()
         return
 
     current_idx = unresolved[0]
@@ -769,7 +777,7 @@ def _render_verification_wizard(verify_indices, match_results, requests):
                 st.rerun()
 
     # Manual input — button toggles between Skip and Save based on input
-    col_manual, col_action = st.columns([3, 1])
+    col_manual, col_action, col_back = st.columns([3, 1, 1])
     with col_manual:
         manual_id = st.text_input(
             "Or enter correct IMDB ID",
@@ -790,6 +798,41 @@ def _render_verification_wizard(verify_indices, match_results, requests):
             if st.button("Skip →", key=f"verify_skip_{current_idx}", use_container_width=True):
                 st.session_state.dupe_verify_decisions[current_idx] = "__skip__"
                 st.rerun()
+    with col_back:
+        st.markdown("<div style='margin-top:26px;'></div>", unsafe_allow_html=True)
+        if completed > 0:
+            if st.button("← Back", key=f"verify_goback_{current_idx}", use_container_width=True):
+                _undo_last_verification(verify_indices, decisions, match_results, requests)
+                st.rerun()
+
+
+def _undo_last_verification(verify_indices, decisions, match_results, requests):
+    """Undo the most recent verification decision and delete from the table if it was a confirm."""
+    resolved = [i for i in verify_indices if i in decisions]
+    if not resolved:
+        return
+    last_idx = resolved[-1]
+    last_decision = decisions.pop(last_idx)
+    st.session_state.dupe_verify_decisions = decisions
+
+    if last_decision != "__skip__":
+        req = requests[last_idx]
+        _, verifier, sql, config = _get_engine()
+        from imdb_engine.normalizer import make_normalized_key
+        norm_key = make_normalized_key(req.title, req.content_type, req.release_year)
+        try:
+            sql.execute(
+                f"DELETE FROM {config.verifications_table} "
+                f"WHERE normalized_key = '{escape_sql(norm_key)}' "
+                f"AND imdb_id = '{escape_sql(last_decision)}'"
+            )
+        except Exception:
+            pass
+
+    if "dupe_results" in st.session_state and last_idx < len(st.session_state.dupe_results):
+        result = match_results[last_idx]
+        st.session_state.dupe_results[last_idx]["confidence"] = result.confidence.value
+        st.session_state.dupe_results[last_idx]["imdb_id"] = result.imdb_id or ""
 
 
 def _record_user_verification(idx, confirmed_imdb_id, result, req):
