@@ -20,56 +20,56 @@ REPORT_DEFAULTS = [
         "description": "Titles waiting for ABF review (PENDING_REVIEW + INTERNAL_REVIEW)",
         "sql_text": "SELECT SUM(count) as backlog_titles FROM core_dev.techops.qa_abf_summary WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM core_dev.techops.qa_abf_summary) AND metric_type = 'current_queue' AND status IN ('PENDING_REVIEW', 'INTERNAL_REVIEW') AND team != 'System'",
         "display_type": "metric",
-        "category": "ABF",
+        "dashboard": "Weekly Ops Review",
     },
     {
         "title": "Imports This Month",
         "description": "Total titles imported in the current month",
         "sql_text": "SELECT SUM(title_count) as imports FROM core_dev.techops.imported_titles_monthly WHERE month = date_trunc('month', current_date())",
         "display_type": "metric",
-        "category": "Imports",
+        "dashboard": "Weekly Ops Review",
     },
     {
         "title": "Open Redeliveries",
         "description": "Total open redeliveries across all partners",
         "sql_text": "SELECT SUM(count) as open_redeliveries FROM core_dev.techops.redelivery_weekly WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM core_dev.techops.redelivery_weekly) AND status = 'open'",
         "display_type": "metric",
-        "category": "Redeliveries",
+        "dashboard": "Redeliveries",
     },
     {
         "title": "Reviews by Team (MTD)",
         "description": "ABF reviews completed this month by team",
         "sql_text": "SELECT team, SUM(count) as titles_reviewed FROM core_dev.techops.qa_abf_summary WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM core_dev.techops.qa_abf_summary) AND metric_type = 'monthly_review' AND status = 'DONE' AND month = date_trunc('month', current_date()) AND team IN ('Ops', 'Contractor', 'System') GROUP BY team ORDER BY titles_reviewed DESC",
         "display_type": "bar_chart",
-        "category": "ABF",
+        "dashboard": "Weekly Ops Review",
     },
     {
         "title": "Redeliveries by Modality",
         "description": "Open redeliveries broken down by type (video/image/subtitle)",
         "sql_text": "SELECT modality, SUM(count) as total FROM core_dev.techops.redelivery_weekly WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM core_dev.techops.redelivery_weekly) AND status = 'open' GROUP BY modality ORDER BY total DESC",
-        "display_type": "pie_chart",
-        "category": "Redeliveries",
+        "display_type": "bar_chart",
+        "dashboard": "Redeliveries",
     },
     {
         "title": "Weekly Import Trend",
         "description": "Imports per week for the last 8 weeks",
         "sql_text": "SELECT date_trunc('week', month) as week, SUM(title_count) as imports FROM core_dev.techops.imported_titles_monthly WHERE month >= current_date() - INTERVAL 56 DAY GROUP BY 1 ORDER BY 1",
         "display_type": "line_chart",
-        "category": "Imports",
+        "dashboard": "Pipeline Health",
     },
     {
         "title": "ABF Queue by Team",
         "description": "Current PENDING_REVIEW queue size by team",
         "sql_text": "SELECT team, SUM(count) as queue_size FROM core_dev.techops.qa_abf_summary WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM core_dev.techops.qa_abf_summary) AND metric_type = 'current_queue' AND status = 'PENDING_REVIEW' AND team != 'System' GROUP BY team ORDER BY queue_size DESC",
         "display_type": "bar_chart",
-        "category": "ABF",
+        "dashboard": "ABF Throughput",
     },
     {
         "title": "Titles Expiring This Month",
         "description": "Titles with policy windows ending this month",
         "sql_text": "SELECT COUNT(*) as expiring FROM core_dev.techops.policy_window_snapshots WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM core_dev.techops.policy_window_snapshots) AND policy_end >= date_trunc('month', current_date()) AND policy_end < date_trunc('month', current_date()) + INTERVAL 1 MONTH AND disabled = false",
         "display_type": "metric",
-        "category": "Policy",
+        "dashboard": "Pipeline Health",
     },
 ]
 
@@ -116,6 +116,10 @@ def _execute_sql_dicts(query):
 def ensure_table_exists():
     try:
         _execute_sql(f"SELECT 1 FROM {TABLE} LIMIT 1")
+        try:
+            _execute_sql(f"SELECT dashboard_id FROM {TABLE} LIMIT 1")
+        except Exception:
+            _execute_sql(f"ALTER TABLE {TABLE} ADD COLUMN dashboard_id STRING")
         return
     except Exception:
         pass
@@ -138,7 +142,8 @@ def ensure_table_exists():
             last_result_json STRING,
             created_at       TIMESTAMP NOT NULL,
             updated_at       TIMESTAMP NOT NULL,
-            sort_order       INT
+            sort_order       INT,
+            dashboard_id     STRING
         ) USING DELTA
     """)
 
@@ -192,7 +197,7 @@ def get_query_by_id(query_id):
 
 def save_query(user_email, title, sql_text, display_type="table",
                description=None, original_prompt=None, genie_space=None,
-               category=None, display_config=None):
+               category=None, display_config=None, dashboard_id=None):
     """Save a new query. Returns the query_id."""
     ensure_table_exists()
     query_id = str(uuid.uuid4())
@@ -202,7 +207,7 @@ def save_query(user_email, title, sql_text, display_type="table",
         INSERT INTO {TABLE}
         (query_id, user_email, title, description, sql_text, original_prompt,
          genie_space, display_type, display_config, category, is_shared, is_default,
-         refresh_schedule, last_refreshed_at, last_result_json, created_at, updated_at, sort_order)
+         refresh_schedule, last_refreshed_at, last_result_json, created_at, updated_at, sort_order, dashboard_id)
         VALUES (
             '{_escape(query_id)}',
             '{_escape(user_email)}',
@@ -221,7 +226,8 @@ def save_query(user_email, title, sql_text, display_type="table",
             NULL,
             '{now}',
             '{now}',
-            0
+            0,
+            {f"'{_escape(dashboard_id)}'" if dashboard_id else "NULL"}
         )
     """)
     return query_id
@@ -232,7 +238,7 @@ def update_query(query_id, **kwargs):
     ensure_table_exists()
     allowed_fields = {
         "title", "description", "sql_text", "display_type", "display_config",
-        "category", "is_shared", "sort_order", "refresh_schedule",
+        "category", "is_shared", "sort_order", "refresh_schedule", "dashboard_id",
     }
     sets = []
     for key, val in kwargs.items():
