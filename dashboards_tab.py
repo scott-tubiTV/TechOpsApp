@@ -265,7 +265,6 @@ def _render_query_card(record, idx, is_owner):
     query_id = record.get("query_id", "")
     genie_space = record.get("genie_space", "")
     last_refreshed = record.get("last_refreshed_at")
-    description = record.get("description", "")
 
     genie_color = "#a855f7"
     if genie_space:
@@ -277,43 +276,49 @@ def _render_query_card(record, idx, is_owner):
         }
         genie_color = space_colors.get(genie_space, "#a855f7")
 
-    st.markdown(f"""
-    <div style="border:1px solid #e7e3ee;background:#fff;border-radius:13px;overflow:hidden;margin-bottom:14px;">
-        <div style="padding:14px 17px 10px;border-bottom:1px solid #f2f0f7;">
+    genie_badge = ""
+    if genie_space:
+        genie_badge = f'<div style="display:inline-flex;align-items:center;gap:6px;margin-top:8px;font-size:11px;font-weight:600;color:#6d647e;background:#f7f5fb;border:1px solid #eceaf2;padding:3px 9px;border-radius:20px;"><span style="width:6px;height:6px;border-radius:50%;background:{genie_color};"></span>{genie_space}</div>'
+
+    with st.container(border=True):
+        # Card header
+        st.markdown(f"""
+        <div style="margin:-1rem -1rem 0.75rem -1rem;padding:14px 17px 10px;border-bottom:1px solid #f2f0f7;">
             <div style="font-size:13.5px;font-weight:700;color:#1b1626;line-height:1.4;">{title}</div>
-            {'<div style="display:inline-flex;align-items:center;gap:6px;margin-top:8px;font-size:11px;font-weight:600;color:#6d647e;background:#f7f5fb;border:1px solid #eceaf2;padding:3px 9px;border-radius:20px;"><span style="width:6px;height:6px;border-radius:50%;background:' + genie_color + ';"></span>' + genie_space + '</div>' if genie_space else ''}
+            {genie_badge}
         </div>
-    </div>
-    """, unsafe_allow_html=True)
+        """, unsafe_allow_html=True)
 
-    columns, rows = get_cached_result(record)
-    if columns and rows:
-        renderer = RENDERERS.get(display_type, _render_table)
-        renderer(columns, rows)
-    else:
-        st.caption("Not yet refreshed")
-
-    footer_cols = st.columns([1, 1, 1, 1])
-    with footer_cols[0]:
-        st.caption(f"↻ {_relative_time(last_refreshed)}")
-    with footer_cols[1]:
-        if st.button("Refresh", key=f"ref_{query_id}_{idx}"):
-            with st.spinner(""):
-                try:
-                    refresh_query(query_id)
-                    st.rerun()
-                except Exception as e:
-                    st.error(str(e)[:80])
-    with footer_cols[2]:
+        # Card body — visualization
+        columns, rows = get_cached_result(record)
         if columns and rows:
-            df = pd.DataFrame(rows, columns=columns)
-            csv = df.to_csv(index=False)
-            st.download_button("CSV", csv, f"{title}.csv", "text/csv", key=f"csv_{query_id}_{idx}")
-    with footer_cols[3]:
-        if is_owner:
-            if st.button("Remove", key=f"rm_{query_id}_{idx}"):
-                update_query(query_id, dashboard_id=None)
-                st.rerun()
+            renderer = RENDERERS.get(display_type, _render_table)
+            renderer(columns, rows)
+        else:
+            st.caption("Not yet refreshed — click Refresh")
+
+        # Card footer
+        footer_cols = st.columns([2, 1, 1, 1])
+        with footer_cols[0]:
+            st.caption(f"↻ {_relative_time(last_refreshed)}")
+        with footer_cols[1]:
+            if st.button("Refresh", key=f"ref_{query_id}_{idx}"):
+                with st.spinner(""):
+                    try:
+                        refresh_query(query_id)
+                        st.rerun()
+                    except Exception as e:
+                        st.error(str(e)[:80])
+        with footer_cols[2]:
+            if columns and rows:
+                df = pd.DataFrame(rows, columns=columns)
+                csv = df.to_csv(index=False)
+                st.download_button("CSV", csv, f"{title}.csv", "text/csv", key=f"csv_{query_id}_{idx}")
+        with footer_cols[3]:
+            if is_owner:
+                if st.button("Remove", key=f"rm_{query_id}_{idx}"):
+                    update_query(query_id, dashboard_id=None)
+                    st.rerun()
 
 
 # === View 3: Dashboard Form ===
