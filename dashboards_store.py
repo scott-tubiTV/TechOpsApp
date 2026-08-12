@@ -152,9 +152,10 @@ def populate_default_dashboards(user_email):
     """Seed default dashboards for a new user. Returns count created."""
     ensure_dashboards_table()
     existing = _execute_sql_dicts(
-        f"SELECT dashboard_id FROM {TABLE} WHERE user_email = '{_escape(user_email)}'"
+        f"SELECT dashboard_id, name FROM {TABLE} WHERE user_email = '{_escape(user_email)}'"
     )
     if existing:
+        _repair_query_assignments(user_email, existing)
         return 0
 
     count = 0
@@ -178,17 +179,32 @@ def populate_default_dashboards(user_email):
         """)
         count += 1
 
-        query_titles = default.get("queries", [])
-        if query_titles:
-            title_conditions = " OR ".join(
-                f"title = '{_escape(t)}'" for t in query_titles
-            )
-            _execute_sql(f"""
-                UPDATE {QUERIES_TABLE}
-                SET dashboard_id = '{_escape(dashboard_id)}', updated_at = '{now}'
-                WHERE user_email = '{_escape(user_email)}'
-                  AND ({title_conditions})
-                  AND (dashboard_id IS NULL OR dashboard_id = '')
-            """)
+        _assign_queries_to_dashboard(user_email, dashboard_id, default.get("queries", []))
 
     return count
+
+
+def _assign_queries_to_dashboard(user_email, dashboard_id, query_titles):
+    """Link queries by title to a dashboard."""
+    if not query_titles:
+        return
+    now = _now_iso()
+    title_conditions = " OR ".join(
+        f"title = '{_escape(t)}'" for t in query_titles
+    )
+    _execute_sql(f"""
+        UPDATE {QUERIES_TABLE}
+        SET dashboard_id = '{_escape(dashboard_id)}', updated_at = '{now}'
+        WHERE user_email = '{_escape(user_email)}'
+          AND ({title_conditions})
+          AND (dashboard_id IS NULL OR dashboard_id = '')
+    """)
+
+
+def _repair_query_assignments(user_email, existing_dashboards):
+    """Re-link any unassigned default queries to their intended dashboards."""
+    dash_name_to_id = {d["name"]: d["dashboard_id"] for d in existing_dashboards}
+    for default in DASHBOARD_DEFAULTS:
+        dashboard_id = dash_name_to_id.get(default["name"])
+        if dashboard_id:
+            _assign_queries_to_dashboard(user_email, dashboard_id, default.get("queries", []))

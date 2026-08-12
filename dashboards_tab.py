@@ -82,8 +82,10 @@ def _render_bar_chart(columns, rows):
         st.caption("No data for chart")
         return
     df = pd.DataFrame(rows, columns=columns)
-    df.iloc[:, 1] = pd.to_numeric(df.iloc[:, 1], errors="coerce")
-    st.bar_chart(df, x=columns[0], y=columns[1], height=160)
+    for c in columns[1:]:
+        df[c] = pd.to_numeric(df[c], errors="coerce")
+    df = df.set_index(columns[0])
+    st.bar_chart(df, height=160)
 
 
 def _render_line_chart(columns, rows):
@@ -91,8 +93,10 @@ def _render_line_chart(columns, rows):
         st.caption("No data for chart")
         return
     df = pd.DataFrame(rows, columns=columns)
-    df.iloc[:, 1] = pd.to_numeric(df.iloc[:, 1], errors="coerce")
-    st.line_chart(df, x=columns[0], y=columns[1], height=160)
+    for c in columns[1:]:
+        df[c] = pd.to_numeric(df[c], errors="coerce")
+    df = df.set_index(columns[0])
+    st.line_chart(df, height=160)
 
 
 def _render_table(columns, rows):
