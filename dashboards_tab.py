@@ -85,7 +85,7 @@ def _render_bar_chart(columns, rows):
     for c in columns[1:]:
         df[c] = pd.to_numeric(df[c], errors="coerce")
     df = df.set_index(columns[0])
-    st.bar_chart(df, height=160)
+    st.bar_chart(df, use_container_width=True)
 
 
 def _render_line_chart(columns, rows):
@@ -96,7 +96,7 @@ def _render_line_chart(columns, rows):
     for c in columns[1:]:
         df[c] = pd.to_numeric(df[c], errors="coerce")
     df = df.set_index(columns[0])
-    st.line_chart(df, height=160)
+    st.line_chart(df, use_container_width=True)
 
 
 def _render_table(columns, rows):
@@ -217,13 +217,16 @@ def _render_dashboard_detail(user_email):
                 queries = get_dashboard_queries(dashboard_id)
                 if queries:
                     progress = st.progress(0)
+                    errors = []
                     for i, q in enumerate(queries):
                         try:
                             refresh_query(q["query_id"])
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            errors.append(f"{q.get('title','?')}: {str(e)[:60]}")
                         progress.progress((i + 1) / len(queries))
                     progress.empty()
+                    if errors:
+                        st.warning(f"Failed to refresh {len(errors)} queries: {'; '.join(errors[:3])}")
                     st.rerun()
         with btn_cols[2]:
             if is_owner:

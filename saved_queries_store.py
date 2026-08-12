@@ -25,7 +25,7 @@ REPORT_DEFAULTS = [
     {
         "title": "Imports This Month",
         "description": "Total titles imported in the current month",
-        "sql_text": "SELECT SUM(title_count) as imports FROM core_dev.techops.imported_titles_monthly WHERE month = date_trunc('month', current_date())",
+        "sql_text": "SELECT SUM(count) as imports FROM core_dev.techops.imported_titles_monthly WHERE month = date_trunc('month', current_date())",
         "display_type": "metric",
         "dashboard": "Weekly Ops Review",
     },
@@ -53,7 +53,7 @@ REPORT_DEFAULTS = [
     {
         "title": "Weekly Import Trend",
         "description": "Imports per week for the last 8 weeks",
-        "sql_text": "SELECT date_trunc('week', month) as week, SUM(title_count) as imports FROM core_dev.techops.imported_titles_monthly WHERE month >= current_date() - INTERVAL 56 DAY GROUP BY 1 ORDER BY 1",
+        "sql_text": "SELECT date_trunc('week', month) as week, SUM(count) as imports FROM core_dev.techops.imported_titles_monthly WHERE month >= current_date() - INTERVAL 56 DAY GROUP BY 1 ORDER BY 1",
         "display_type": "line_chart",
         "dashboard": "Pipeline Health",
     },
