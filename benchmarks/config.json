@@ -113,6 +113,14 @@
       "expected_table": "qa_abf_summary"
     },
     {
+      "id": "abf_backlog_unique_titles",
+      "question": "How many unique titles are in the ABF backlog (pending + internal review)?",
+      "space": "Content Metrics",
+      "validation_sql": "SELECT SUM(count) as answer FROM core_dev.techops.qa_abf_summary WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM core_dev.techops.qa_abf_summary) AND metric_type = 'current_queue' AND status IN ('PENDING_REVIEW', 'INTERNAL_REVIEW') AND team != 'System'",
+      "check": "table_used",
+      "expected_table": "qa_abf_summary"
+    },
+    {
       "id": "open_redeliveries_total",
       "question": "How many open redeliveries are there right now?",
       "space": "Redeliveries",
@@ -646,6 +654,40 @@
       "check": "percentage",
       "tolerance": 0.10,
       "expected_table": "content_library"
+    },
+    {
+      "id": "abf_internal_review_total",
+      "question": "What is the current total of titles with ABF status Internal Review?",
+      "space": "Content Metrics",
+      "validation_sql": "SELECT SUM(count) as answer FROM core_dev.techops.qa_abf_summary WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM core_dev.techops.qa_abf_summary) AND metric_type = 'current_queue' AND status = 'INTERNAL_REVIEW'",
+      "check": "percentage",
+      "tolerance": 0.10,
+      "expected_table": "qa_abf_summary"
+    },
+    {
+      "id": "abf_reviews_completed_this_month",
+      "question": "How many ABF jobs were completed this month?",
+      "space": "Content Metrics",
+      "validation_sql": "SELECT SUM(count) as answer FROM core_dev.techops.qa_abf_summary WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM core_dev.techops.qa_abf_summary) AND metric_type = 'monthly_review' AND status = 'DONE' AND month = date_trunc('month', current_date())",
+      "check": "percentage",
+      "tolerance": 0.10,
+      "expected_table": "qa_abf_summary"
+    },
+    {
+      "id": "new_avails_this_month_by_type",
+      "question": "What is the count of new avails created this month by content type?",
+      "space": "Content Metrics",
+      "validation_sql": "SELECT content_type, COUNT(*) as count FROM core_dev.techops.avails_status_snapshot WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM core_dev.techops.avails_status_snapshot) AND inserted_at >= date_trunc('month', current_date()) GROUP BY content_type",
+      "check": "table_used",
+      "expected_table": "avails_status_snapshot"
+    },
+    {
+      "id": "overdue_redeliveries_by_partner",
+      "question": "Which partners have the most overdue redeliveries?",
+      "space": "Redeliveries",
+      "validation_sql": "SELECT import_id, COUNT(*) as overdue_count FROM core_dev.techops.redeliveries WHERE dismissed = false AND is_active_redelivery = true AND duration > 14 GROUP BY import_id ORDER BY overdue_count DESC LIMIT 10",
+      "check": "table_used",
+      "expected_table": "redeliveries"
     }
   ]
 }
