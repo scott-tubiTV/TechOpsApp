@@ -17,8 +17,8 @@ MAX_CACHED_ROWS = 100
 REPORT_DEFAULTS = [
     {
         "title": "ABF Backlog",
-        "description": "Titles waiting for ABF review (PENDING_REVIEW + INTERNAL_REVIEW)",
-        "sql_text": "SELECT SUM(count) as backlog_titles FROM core_dev.techops.qa_abf_summary WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM core_dev.techops.qa_abf_summary) AND metric_type = 'current_queue' AND status IN ('PENDING_REVIEW', 'INTERNAL_REVIEW') AND team != 'System'",
+        "description": "Unique titles waiting for ABF review (PENDING_REVIEW + INTERNAL_REVIEW)",
+        "sql_text": "SELECT COUNT(DISTINCT content_id) as backlog_titles FROM (SELECT content_id, status, ROW_NUMBER() OVER (PARTITION BY content_id ORDER BY inserted_at DESC) as rn FROM core_prod.contentavails_cdc.assessments WHERE content_type IN ('episode', 'movie')) WHERE rn = 1 AND status IN ('PENDING_REVIEW', 'INTERNAL_REVIEW')",
         "display_type": "metric",
         "dashboard": "Weekly Ops Review",
     },
