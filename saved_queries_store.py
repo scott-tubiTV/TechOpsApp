@@ -1,5 +1,6 @@
 """Persistence layer for saved queries / reports in Argo."""
 
+import base64
 import json
 import time
 import uuid
@@ -148,6 +149,19 @@ def _escape(val):
     return str(val).replace("\\", "\\\\").replace("'", "''")
 
 
+def _encode_sql(sql_text):
+    return base64.b64encode(sql_text.encode("utf-8")).decode("ascii")
+
+
+def _decode_sql(encoded):
+    if not encoded:
+        return ""
+    try:
+        return base64.b64decode(encoded.encode("ascii")).decode("utf-8")
+    except Exception:
+        return encoded
+
+
 def _now_iso():
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
@@ -194,7 +208,7 @@ def save_query(user_email, title, sql_text, display_type="table",
             '{_escape(user_email)}',
             '{_escape(title)}',
             {f"'{_escape(description)}'" if description else "NULL"},
-            '{_escape(sql_text)}',
+            '{_escape(_encode_sql(sql_text))}',
             {f"'{_escape(original_prompt)}'" if original_prompt else "NULL"},
             {f"'{_escape(genie_space)}'" if genie_space else "NULL"},
             '{_escape(display_type)}',
@@ -228,6 +242,8 @@ def update_query(query_id, **kwargs):
             sets.append(f"{key} = {str(val).lower()}")
         elif val is None:
             sets.append(f"{key} = NULL")
+        elif key == "sql_text":
+            sets.append(f"{key} = '{_escape(_encode_sql(val))}'")
         else:
             sets.append(f"{key} = '{_escape(val)}'")
 
@@ -251,7 +267,7 @@ def refresh_query(query_id):
     if not record:
         raise ValueError(f"Query {query_id} not found")
 
-    sql_text = record["sql_text"]
+    sql_text = _decode_sql(record["sql_text"])
     columns, rows = _execute_sql(sql_text)
 
     cached_rows = rows[:MAX_CACHED_ROWS]
@@ -288,8 +304,15 @@ def populate_defaults(user_email):
     """Insert default queries for a new user. Returns count inserted."""
     ensure_table_exists()
     existing = _execute_sql_dicts(
-        f"SELECT query_id FROM {TABLE} WHERE user_email = '{_escape(user_email)}'"
+        f"SELECT query_id, sql_text FROM {TABLE} WHERE user_email = '{_escape(user_email)}'"
     )
+    if existing:
+        first_sql = existing[0].get("sql_text", "")
+        if not first_sql.startswith("SELECT") and not first_sql.startswith("select"):
+            pass
+        else:
+            _execute_sql(f"DELETE FROM {TABLE} WHERE user_email = '{_escape(user_email)}' AND is_default = true")
+            existing = []
     if existing:
         return 0
 
@@ -307,7 +330,7 @@ def populate_defaults(user_email):
                 '{_escape(user_email)}',
                 '{_escape(default["title"])}',
                 '{_escape(default.get("description", ""))}',
-                '{_escape(default["sql_text"])}',
+                '{_escape(_encode_sql(default["sql_text"]))}',
                 NULL,
                 NULL,
                 '{_escape(default["display_type"])}',

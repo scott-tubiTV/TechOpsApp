@@ -14,6 +14,7 @@ from saved_queries_store import (
     populate_defaults,
     get_cached_result,
     detect_display_type,
+    _decode_sql,
 )
 
 
@@ -141,7 +142,7 @@ def _render_edit_form(record, idx):
     with st.form(key=f"edit_form_{query_id}_{idx}"):
         new_title = st.text_input("Title", value=record.get("title", ""))
         new_desc = st.text_input("Description", value=record.get("description", ""))
-        new_sql = st.text_area("SQL", value=record.get("sql_text", ""), height=120)
+        new_sql = st.text_area("SQL", value=_decode_sql(record.get("sql_text", "")), height=120)
         new_display = st.selectbox(
             "Display type",
             ["metric", "bar_chart", "line_chart", "pie_chart", "table"],
