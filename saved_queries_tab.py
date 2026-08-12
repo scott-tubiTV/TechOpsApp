@@ -90,6 +90,15 @@ def _render_report_card(record, idx):
     last_refreshed = record.get("last_refreshed_at")
     is_default = record.get("is_default") in (True, "true", "1")
 
+    refreshed_label = ""
+    if last_refreshed:
+        try:
+            from datetime import datetime
+            ts = datetime.fromisoformat(last_refreshed.replace("Z", "+00:00"))
+            refreshed_label = f'<div style="font-size:10px; color:#a49bb3; margin-top:4px;">Last refreshed: {ts.strftime("%b %d, %Y %I:%M %p")} UTC</div>'
+        except Exception:
+            refreshed_label = f'<div style="font-size:10px; color:#a49bb3; margin-top:4px;">Last refreshed: {last_refreshed}</div>'
+
     with st.container():
         st.markdown(f"""
         <div style="border:1px solid #eceaf2; border-radius:12px; padding:16px; margin-bottom:12px; background:#faf9fc;">
@@ -97,6 +106,7 @@ def _render_report_card(record, idx):
                 <div>
                     <div style="font-weight:700; font-size:15px; color:#1b1626;">{title}</div>
                     <div style="font-size:12px; color:#8a8199; margin-top:2px;">{description}</div>
+                    {refreshed_label}
                 </div>
                 <div style="font-size:10px; color:#a49bb3; text-transform:uppercase; letter-spacing:0.05em;">
                     {display_type.replace('_', ' ')}
