@@ -472,12 +472,12 @@ def render_imdb_dupe_checker():
     needs_review = len([r for r in results if r["confidence"] in ("LOW", "MEDIUM", "CONFLICT")])
 
     cols = st.columns(6)
-    cols[0].metric("Total", total)
-    cols[1].metric("IMDB Matched", matched_imdb)
-    cols[2].metric("Verified", verified)
-    cols[3].metric("Duplicates", duplicates)
-    cols[4].metric("Conflicts", conflicts)
-    cols[5].metric("Needs Review", needs_review)
+    cols[0].metric("Total", total, help="Total number of titles submitted for checking.")
+    cols[1].metric("IMDB Matched", matched_imdb, help="Titles successfully matched to an IMDB ID via content_info lookup, catalog search, or file-provided ID.")
+    cols[2].metric("Verified", verified, help="Matches manually confirmed by a user in the verification wizard. These are remembered and auto-resolve on future runs.")
+    cols[3].metric("Duplicates", duplicates, help="Titles whose IMDB ID already exists in Tubi's backend under a different content_id — potential duplicate ingestion.")
+    cols[4].metric("Conflicts", conflicts, help="Duplicates that have active policy windows (licensing deals) on the existing content_id — ingesting again may violate rights.")
+    cols[5].metric("Needs Review", needs_review, help="LOW, MEDIUM, or CONFLICT confidence matches that should be manually verified before trusting the result.")
 
     # Verification wizard for MEDIUM/LOW/CONFLICT results
     verify_indices = [
