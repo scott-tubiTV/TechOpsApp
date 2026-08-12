@@ -32,7 +32,7 @@ REPORT_DEFAULTS = [
     {
         "title": "Open Redeliveries",
         "description": "Total open redeliveries across all partners",
-        "sql_text": "SELECT SUM(count) as open_redeliveries FROM core_dev.techops.redelivery_weekly WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM core_dev.techops.redelivery_weekly) AND status = 'open'",
+        "sql_text": "SELECT open_redeliveries_total FROM core_dev.techops.redelivery_weekly WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM core_dev.techops.redelivery_weekly)",
         "display_type": "metric",
         "dashboard": "Redeliveries",
     },
@@ -46,7 +46,7 @@ REPORT_DEFAULTS = [
     {
         "title": "Redeliveries by Modality",
         "description": "Open redeliveries broken down by type (video/image/subtitle)",
-        "sql_text": "SELECT modality, SUM(count) as total FROM core_dev.techops.redelivery_weekly WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM core_dev.techops.redelivery_weekly) AND status = 'open' GROUP BY modality ORDER BY total DESC",
+        "sql_text": "SELECT 'Video' as modality, open_redeliveries_video as total FROM core_dev.techops.redelivery_weekly WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM core_dev.techops.redelivery_weekly) UNION ALL SELECT 'Images', open_redeliveries_images FROM core_dev.techops.redelivery_weekly WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM core_dev.techops.redelivery_weekly) UNION ALL SELECT 'Subtitles', open_redeliveries_subtitles FROM core_dev.techops.redelivery_weekly WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM core_dev.techops.redelivery_weekly)",
         "display_type": "bar_chart",
         "dashboard": "Redeliveries",
     },
@@ -67,7 +67,7 @@ REPORT_DEFAULTS = [
     {
         "title": "Titles Expiring This Month",
         "description": "Titles with policy windows ending this month",
-        "sql_text": "SELECT COUNT(*) as expiring FROM core_dev.techops.policy_window_snapshots WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM core_dev.techops.policy_window_snapshots) AND policy_end >= date_trunc('month', current_date()) AND policy_end < date_trunc('month', current_date()) + INTERVAL 1 MONTH AND disabled = false",
+        "sql_text": "SELECT COUNT(DISTINCT content_id) as expiring FROM core_dev.techops.policy_window_snapshots WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM core_dev.techops.policy_window_snapshots) AND window_end >= date_trunc('month', current_date()) AND window_end < date_trunc('month', current_date()) + INTERVAL 1 MONTH AND policy_disabled = false",
         "display_type": "metric",
         "dashboard": "Pipeline Health",
     },
