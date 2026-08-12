@@ -532,13 +532,16 @@ def render_imdb_dupe_checker():
 
     # Downloads
     st.divider()
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns(4)
     with col1:
         st.download_button("Download all results", df.to_csv(index=False), "imdb_dupe_check_results.csv", "text/csv")
     with col2:
         if duplicates > 0:
             st.download_button("Download duplicates", df[df["is_duplicate"] == True].to_csv(index=False), "duplicates.csv", "text/csv")
     with col3:
+        if needs_review > 0:
+            st.download_button("Download needs review", df[df["confidence"].isin(["LOW", "MEDIUM", "CONFLICT"])].to_csv(index=False), "needs_review.csv", "text/csv")
+    with col4:
         if total - matched_imdb > 0:
             st.download_button("Download unmatched", df[df["imdb_id"] == ""].to_csv(index=False), "unmatched.csv", "text/csv")
 
