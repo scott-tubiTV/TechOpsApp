@@ -21,6 +21,7 @@ from imdb_engine import (
     Confidence,
 )
 from imdb_engine.normalizer import escape_sql
+from tools.sony_matcher import _query_avails, _build_index, match_title, _query_import_ids
 
 POLICY_WINDOWS = "core_prod.policydb_cdc.content_policy_windows"
 RICH_CONTENT = "ml_prod.common.rich_content"
@@ -380,6 +381,20 @@ def render_imdb_dupe_checker():
             else:
                 input_text = uploaded.read().decode("utf-8")
 
+    try:
+        import_ids = _query_import_ids()
+    except Exception:
+        import_ids = []
+    selected_import_id = st.selectbox(
+        "Partner being checked (enables content ID fallback for unmatched titles)",
+        ["(none)"] + import_ids,
+        index=0,
+        key="dupe_import_id",
+        help="Select the partner whose avails list you're checking. Unmatched titles will be looked up in this partner's avails to find content IDs.",
+    )
+    if selected_import_id == "(none)":
+        selected_import_id = None
+
     if st.button("Run Dupe Check", type="primary", key="dupe_btn"):
         if not input_text or not input_text.strip():
             st.warning("Paste or upload titles first.")
@@ -428,6 +443,69 @@ def render_imdb_dupe_checker():
             for i in range(len(match_results)):
                 if match_results[i] is None:
                     match_results[i] = MatchResult(request=requests[i])
+
+            # Content ID fallback pass for unmatched titles
+            if selected_import_id:
+                unmatched_indices = [
+                    i for i, r in enumerate(match_results)
+                    if not r.imdb_id or r.imdb_id.strip() == ""
+                ]
+                if unmatched_indices:
+                    progress.info(f"Fallback: checking {len(unmatched_indices)} unmatched titles against {selected_import_id} avails...")
+                    try:
+                        avails_rows = _query_avails(selected_import_id)
+                        avails_index = _build_index(avails_rows)
+                        fallback_cids = {}
+                        for idx in unmatched_indices:
+                            req = requests[idx]
+                            result = match_title(req.title, req.content_type, avails_index)
+                            if result["status"] in ("Match", "Fuzzy") and result["content_id"] != "NEW":
+                                cid = result["content_id"].split(" / ")[0].strip()
+                                fallback_cids[idx] = cid
+
+                        if fallback_cids:
+                            progress.info(f"Fallback: found {len(fallback_cids)} content IDs, looking up IMDB IDs...")
+                            cid_list = ", ".join(f"'{escape_sql(cid)}'" for cid in set(fallback_cids.values()))
+                            try:
+                                rc_rows = sql_client.execute(f"""
+                                    SELECT tubi_video_id AS content_id, imdb_id
+                                    FROM {config.rich_content_table}
+                                    WHERE tubi_video_id IN ({cid_list})
+                                      AND imdb_id IS NOT NULL AND TRIM(imdb_id) != ''
+                                """)
+                            except Exception:
+                                rc_rows = []
+                            rc_map = {r["content_id"]: r["imdb_id"] for r in rc_rows}
+
+                            # Also check content_info for imdb_id
+                            missing_cids = [cid for cid in set(fallback_cids.values()) if cid not in rc_map]
+                            if missing_cids:
+                                ci_list = ", ".join(f"'{escape_sql(cid)}'" for cid in missing_cids)
+                                try:
+                                    ci_rows = sql_client.execute(f"""
+                                        SELECT content_id, COALESCE(imdb_id, program_imdb_id) AS imdb_id
+                                        FROM {config.content_info_table}
+                                        WHERE content_id IN ({ci_list})
+                                          AND COALESCE(imdb_id, program_imdb_id) IS NOT NULL
+                                    """)
+                                except Exception:
+                                    ci_rows = []
+                                for r in ci_rows:
+                                    if r["imdb_id"] and r["imdb_id"].strip():
+                                        rc_map.setdefault(r["content_id"], r["imdb_id"].strip())
+
+                            for idx, cid in fallback_cids.items():
+                                imdb_id = rc_map.get(cid)
+                                match_results[idx] = MatchResult(
+                                    request=requests[idx],
+                                    imdb_id=imdb_id,
+                                    content_id=cid,
+                                    confidence=Confidence.MEDIUM if imdb_id else Confidence.LOW,
+                                    match_method=MatchMethod.AVAILS_FALLBACK,
+                                    metadata={"fallback_import_id": selected_import_id},
+                                )
+                    except Exception as e:
+                        progress.warning(f"Fallback pass failed: {e}")
 
             # Collect IMDB IDs for dupe detection
             progress.info("Checking for duplicates...")
@@ -544,6 +622,75 @@ def render_imdb_dupe_checker():
     with col4:
         if total - matched_imdb > 0:
             st.download_button("Download unmatched", df[df["imdb_id"] == ""].to_csv(index=False), "unmatched.csv", "text/csv")
+
+    _render_reupload_section()
+
+
+def _render_reupload_section():
+    """Let users re-upload CSVs with manually-researched IMDB IDs to teach the system."""
+    with st.expander("Import verified IMDB IDs", expanded=False):
+        st.caption(
+            "Download 'Unmatched' or 'Needs Review', add the correct imdb_id column "
+            "(format: tt1234567), then re-upload here. Verified IDs auto-resolve on future runs."
+        )
+        uploaded = st.file_uploader("Upload CSV with IMDB IDs", type=["csv"], key="reupload_verified")
+        if uploaded:
+            csv_text = uploaded.read().decode("utf-8")
+            reader = csv.DictReader(io.StringIO(csv_text))
+            rows = list(reader)
+
+            if not rows:
+                st.warning("CSV is empty.")
+                return
+
+            # Check for required columns
+            cols_lower = {c.lower().strip(): c for c in rows[0].keys()} if rows else {}
+            title_col = cols_lower.get("title")
+            imdb_col = cols_lower.get("imdb_id")
+
+            if not title_col or not imdb_col:
+                st.error("CSV must have 'title' and 'imdb_id' columns.")
+                return
+
+            type_col = cols_lower.get("type")
+            year_col = cols_lower.get("release_year") or cols_lower.get("year")
+
+            valid_rows = []
+            skipped = 0
+            for row in rows:
+                title = (row.get(title_col) or "").strip()
+                imdb_id = (row.get(imdb_col) or "").strip()
+                if not title or not re.match(r"^tt\d{7,}$", imdb_id):
+                    skipped += 1
+                    continue
+                valid_rows.append({
+                    "title": title,
+                    "imdb_id": imdb_id,
+                    "content_type": (row.get(type_col) or "").strip().upper() if type_col else "",
+                    "release_year": (row.get(year_col) or "").strip() if year_col else "",
+                })
+
+            st.info(f"{len(valid_rows)} valid rows, {skipped} skipped (missing title or invalid IMDB ID)")
+
+            if valid_rows and st.button("Save to verification database", type="primary", key="reupload_save_btn"):
+                _, verifier, _, _ = _get_engine()
+                user_email = _get_user_email()
+                saved = 0
+                for row in valid_rows:
+                    try:
+                        record = VerificationRecord(
+                            title=row["title"],
+                            imdb_id=row["imdb_id"],
+                            verified_by=user_email,
+                            content_type=row["content_type"],
+                            release_year=row["release_year"],
+                            match_method="manual_reupload",
+                        )
+                        verifier.record_verification(record)
+                        saved += 1
+                    except Exception:
+                        pass
+                st.success(f"Saved {saved} verified IMDB IDs. These will auto-resolve on future runs.")
 
 
 def _render_verification_wizard(verify_indices, match_results, requests):

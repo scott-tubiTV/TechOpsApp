@@ -22,6 +22,7 @@ class MatchMethod(Enum):
     FUZZY_IMDB_CATALOG = "fuzzy_imdb_catalog"
     DIRECTOR_DISAMBIGUATION = "director_disambiguation"
     CROSS_VALIDATED = "cross_validated"
+    AVAILS_FALLBACK = "avails_fallback"
 
 
 @dataclass
