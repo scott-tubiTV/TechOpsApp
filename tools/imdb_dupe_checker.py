@@ -618,10 +618,26 @@ def _render_verification_wizard(verify_indices, match_results, requests):
                 _record_user_verification(current_idx, imdb_id, result, req)
                 st.rerun()
 
-    # Skip button
-    if st.button("Skip →", key=f"verify_skip_{current_idx}"):
-        st.session_state.dupe_verify_decisions[current_idx] = "__skip__"
-        st.rerun()
+    # Manual input + Skip
+    col_manual, col_skip = st.columns([3, 1])
+    with col_manual:
+        manual_id = st.text_input(
+            "Or enter correct IMDB ID",
+            placeholder="tt0000000",
+            key=f"manual_imdb_{current_idx}",
+        )
+        if st.button("Save Manual ID", key=f"verify_manual_{current_idx}", disabled=not manual_id):
+            clean_id = manual_id.strip()
+            if re.match(r"^tt\d{7,}$", clean_id):
+                _record_user_verification(current_idx, clean_id, result, req)
+                st.rerun()
+            else:
+                st.error("IMDB ID must be in format ttXXXXXXX (e.g. tt1234567)")
+    with col_skip:
+        st.markdown("<div style='margin-top:26px;'></div>", unsafe_allow_html=True)
+        if st.button("Skip →", key=f"verify_skip_{current_idx}", use_container_width=True):
+            st.session_state.dupe_verify_decisions[current_idx] = "__skip__"
+            st.rerun()
 
 
 def _record_user_verification(idx, confirmed_imdb_id, result, req):
