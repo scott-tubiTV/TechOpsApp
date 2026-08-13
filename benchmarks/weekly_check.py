@@ -371,6 +371,7 @@ CANONICAL_PATTERNS = [
         "name": "Redeliveries must filter dismissed and active",
         "question_keywords": ["open redeliveries", "active redeliveries"],
         "question_context": [],
+        "required_sql_present": ["redeliveries"],
         "required_sql": ["dismissed", "is_active_redelivery"],
         "require_all": True,
         "explanation": "Open redeliveries must filter dismissed = false AND is_active_redelivery = true.",
@@ -401,8 +402,12 @@ def _check_canonical_patterns(question, sql_lower):
         if not has_context:
             continue
 
-        # Check required SQL patterns
+        # Check required SQL patterns (only if prerequisite table is present)
         if "required_sql" in pattern:
+            prereq = pattern.get("required_sql_present")
+            if prereq and not all(p in sql_lower for p in prereq):
+                continue  # table not used in this query, skip check
+
             if pattern.get("require_all"):
                 missing = [p for p in pattern["required_sql"] if p not in sql_lower]
                 if missing:

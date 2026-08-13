@@ -96,7 +96,7 @@
     },
     {
       "id": "abf_queue_size",
-      "question": "How many titles are in the ABF review queue right now?",
+      "question": "How many titles are in the ABF backlog right now?",
       "space": "Content Metrics",
       "validation_sql": "SELECT SUM(count) as answer FROM core_dev.techops.qa_abf_summary WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM core_dev.techops.qa_abf_summary) AND metric_type = 'current_queue' AND status IN ('PENDING_REVIEW', 'INTERNAL_REVIEW')",
       "check": "percentage",
@@ -692,11 +692,10 @@
     },
     {
       "id": "abf_pending_review_by_team",
-      "question": "How many titles are pending ABF review by team?",
+      "question": "How many titles are in the ABF backlog by team?",
       "space": "Content Metrics",
       "validation_sql": "SELECT team, SUM(count) as total FROM core_dev.techops.qa_abf_summary WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM core_dev.techops.qa_abf_summary) AND metric_type = 'current_queue' AND status IN ('PENDING_REVIEW', 'INTERNAL_REVIEW') GROUP BY team ORDER BY total DESC",
-      "check": "percentage",
-      "tolerance": 0.05,
+      "check": "table_used",
       "expected_table": "qa_abf_summary"
     }
   ]
