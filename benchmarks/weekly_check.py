@@ -317,6 +317,115 @@ def _audit_pair(pair, dry_run):
             else:
                 issues.append(f"SQL errors: {err[:100]}")
 
+    # Check 6: Canonical query mismatch — detect when Genie SQL is missing critical filters
+    question = pair.get("question", "").lower()
+    canonical_issues = _check_canonical_patterns(question, sql_lower)
+    issues.extend(canonical_issues)
+
+    return issues
+
+
+# Canonical patterns: question keywords → required SQL patterns
+CANONICAL_PATTERNS = [
+    {
+        "name": "ABF backlog should include both statuses",
+        "question_keywords": ["backlog", "pending review", "queue", "waiting for review"],
+        "question_context": ["abf", "review"],  # at least one of these must also appear
+        "required_sql": ["pending_review", "internal_review"],
+        "require_all": True,
+        "explanation": "ABF backlog = PENDING_REVIEW + INTERNAL_REVIEW. Query only filters one status.",
+    },
+    {
+        "name": "ABF queue must use current_queue metric_type",
+        "question_keywords": ["queue", "backlog", "pending"],
+        "question_context": ["abf"],
+        "required_sql": ["current_queue"],
+        "require_all": True,
+        "explanation": "ABF queue questions should filter metric_type = 'current_queue', not monthly_review.",
+    },
+    {
+        "name": "Live titles must use policy_window_snapshots",
+        "question_keywords": ["live", "streaming"],
+        "question_context": ["titles", "how many"],
+        "required_sql": ["policy_window_snapshots"],
+        "require_all": True,
+        "explanation": "Live title counts require policy_window_snapshots, not avails_status_snapshot.",
+    },
+    {
+        "name": "New avails must filter by inserted_at",
+        "question_keywords": ["new avails", "avails created"],
+        "question_context": ["month", "week", "today"],
+        "required_sql": ["inserted_at"],
+        "require_all": True,
+        "explanation": "New avails = filtered by inserted_at date range, not just status.",
+    },
+    {
+        "name": "Imports should use imported_titles_monthly not avails",
+        "question_keywords": ["imported", "imports"],
+        "question_context": ["titles", "month"],
+        "required_sql": ["imported_titles_monthly"],
+        "require_all": True,
+        "explanation": "Import volume should use imported_titles_monthly, not avails_status_snapshot.",
+    },
+    {
+        "name": "Redeliveries must filter dismissed and active",
+        "question_keywords": ["open redeliveries", "active redeliveries"],
+        "question_context": [],
+        "required_sql": ["dismissed", "is_active_redelivery"],
+        "require_all": True,
+        "explanation": "Open redeliveries must filter dismissed = false AND is_active_redelivery = true.",
+    },
+    {
+        "name": "Pre-aggregated tables need SUM not COUNT",
+        "question_keywords": ["how many", "total", "count"],
+        "question_context": ["abf", "review"],
+        "required_sql_absent": ["count(*)"],  # should NOT appear if qa_abf_summary is used
+        "required_sql_present": ["qa_abf_summary"],
+        "explanation": "qa_abf_summary is pre-aggregated — use SUM(count) not COUNT(*).",
+    },
+]
+
+
+def _check_canonical_patterns(question, sql_lower):
+    issues = []
+    for pattern in CANONICAL_PATTERNS:
+        # Check if question matches this pattern
+        has_keyword = any(kw in question for kw in pattern["question_keywords"])
+        if not has_keyword:
+            continue
+
+        has_context = (
+            not pattern["question_context"]
+            or any(ctx in question for ctx in pattern["question_context"])
+        )
+        if not has_context:
+            continue
+
+        # Check required SQL patterns
+        if "required_sql" in pattern:
+            if pattern.get("require_all"):
+                missing = [p for p in pattern["required_sql"] if p not in sql_lower]
+                if missing:
+                    issues.append(
+                        f"Canonical mismatch ({pattern['name']}) — {pattern['explanation']} "
+                        f"Missing: {', '.join(missing)}"
+                    )
+            else:
+                if not any(p in sql_lower for p in pattern["required_sql"]):
+                    issues.append(
+                        f"Canonical mismatch ({pattern['name']}) — {pattern['explanation']}"
+                    )
+
+        # Check patterns that should be absent
+        if "required_sql_absent" in pattern and "required_sql_present" in pattern:
+            if all(p in sql_lower for p in pattern["required_sql_present"]):
+                for bad in pattern["required_sql_absent"]:
+                    if bad in sql_lower:
+                        issues.append(
+                            f"Canonical mismatch ({pattern['name']}) — {pattern['explanation']}"
+                        )
+                        break
+
     return issues
 
 

@@ -21,6 +21,7 @@ from tools.sony_matcher import render_content_id_matcher
 from tools.imdb_dupe_checker import render_imdb_dupe_checker
 from tools.genie_benchmark import render_genie_benchmark
 from dashboards_tab import render_dashboards_tab
+from sanity_check import check_sanity
 
 ADMIN_EMAILS = [
     "swhitney@tubi.tv",
@@ -1198,6 +1199,11 @@ def _render_chat(prompt=None, user_email=None):
 
                         if answer:
                             st.markdown(answer)
+
+                        sanity_warning = check_sanity(prompt, query_df) if query_df is not None else None
+                        if sanity_warning:
+                            st.warning(sanity_warning)
+
                         if query_df is not None:
                             col_table, col_download = st.columns([6, 1])
                             with col_table:

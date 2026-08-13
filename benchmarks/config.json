@@ -98,7 +98,7 @@
       "id": "abf_queue_size",
       "question": "How many titles are in the ABF review queue right now?",
       "space": "Content Metrics",
-      "validation_sql": "SELECT SUM(count) as answer FROM core_dev.techops.qa_abf_summary WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM core_dev.techops.qa_abf_summary) AND metric_type = 'current_queue' AND status = 'PENDING_REVIEW' AND team != 'System'",
+      "validation_sql": "SELECT SUM(count) as answer FROM core_dev.techops.qa_abf_summary WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM core_dev.techops.qa_abf_summary) AND metric_type = 'current_queue' AND status IN ('PENDING_REVIEW', 'INTERNAL_REVIEW')",
       "check": "percentage",
       "tolerance": 0.05,
       "expected_table": "qa_abf_summary"
@@ -116,8 +116,9 @@
       "id": "abf_backlog_unique_titles",
       "question": "How many unique titles are in the ABF backlog (pending + internal review)?",
       "space": "Content Metrics",
-      "validation_sql": "SELECT SUM(count) as answer FROM core_dev.techops.qa_abf_summary WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM core_dev.techops.qa_abf_summary) AND metric_type = 'current_queue' AND status IN ('PENDING_REVIEW', 'INTERNAL_REVIEW') AND team != 'System'",
-      "check": "table_used",
+      "validation_sql": "SELECT SUM(count) as answer FROM core_dev.techops.qa_abf_summary WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM core_dev.techops.qa_abf_summary) AND metric_type = 'current_queue' AND status IN ('PENDING_REVIEW', 'INTERNAL_REVIEW')",
+      "check": "percentage",
+      "tolerance": 0.05,
       "expected_table": "qa_abf_summary"
     },
     {
@@ -688,6 +689,15 @@
       "validation_sql": "SELECT import_id, COUNT(*) as overdue_count FROM core_dev.techops.redeliveries WHERE dismissed = false AND is_active_redelivery = true AND duration > 14 GROUP BY import_id ORDER BY overdue_count DESC LIMIT 10",
       "check": "table_used",
       "expected_table": "redeliveries"
+    },
+    {
+      "id": "abf_pending_review_by_team",
+      "question": "How many titles are pending ABF review by team?",
+      "space": "Content Metrics",
+      "validation_sql": "SELECT team, SUM(count) as total FROM core_dev.techops.qa_abf_summary WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM core_dev.techops.qa_abf_summary) AND metric_type = 'current_queue' AND status IN ('PENDING_REVIEW', 'INTERNAL_REVIEW') GROUP BY team ORDER BY total DESC",
+      "check": "percentage",
+      "tolerance": 0.05,
+      "expected_table": "qa_abf_summary"
     }
   ]
 }
