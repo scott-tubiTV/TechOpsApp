@@ -531,6 +531,91 @@ def _identify_deep_dives(benchmark_results, audit_results):
     return deep_dives
 
 
+# ─── ACCURACY METRICS ────────────────────────────────────────────────────────
+
+ACCURACY_TABLE = "core_dev.techops.genie_accuracy"
+
+
+def compute_accuracy(audit_results):
+    """Compute accuracy metrics from audit results."""
+    if not audit_results or audit_results["pairs"] == 0:
+        return None
+
+    total_pairs = audit_results["pairs"]
+    # Count unique Q&A pairs with at least one issue
+    pairs_with_issues = len(audit_results["issues"])
+    clean_pairs = total_pairs - pairs_with_issues
+    accuracy_pct = (clean_pairs / total_pairs) * 100 if total_pairs > 0 else 0
+
+    # Break down by issue type
+    issue_breakdown = {}
+    for item in audit_results["issues"]:
+        for issue in item["issues"]:
+            key = issue.split("—")[0].strip() if "—" in issue else issue.split(":")[0].strip()
+            issue_breakdown[key] = issue_breakdown.get(key, 0) + 1
+
+    return {
+        "total_pairs": total_pairs,
+        "clean_pairs": clean_pairs,
+        "pairs_with_issues": pairs_with_issues,
+        "accuracy_pct": round(accuracy_pct, 1),
+        "conversations": audit_results["conversations"],
+        "issue_breakdown": issue_breakdown,
+    }
+
+
+def persist_accuracy(accuracy, since_date):
+    """Write daily accuracy snapshot to Delta table."""
+    if not accuracy:
+        return
+
+    # Ensure table exists
+    create_sql = f"""
+        CREATE TABLE IF NOT EXISTS {ACCURACY_TABLE} (
+            snapshot_date DATE,
+            audit_window_start STRING,
+            total_conversations INT,
+            total_pairs INT,
+            clean_pairs INT,
+            pairs_with_issues INT,
+            accuracy_pct DOUBLE,
+            issue_breakdown STRING,
+            created_at TIMESTAMP
+        ) USING DELTA
+    """
+    run_sql(create_sql)
+
+    breakdown_json = json.dumps(accuracy["issue_breakdown"]).replace("'", "''")
+
+    insert_sql = f"""
+        MERGE INTO {ACCURACY_TABLE} AS target
+        USING (SELECT current_date() AS snapshot_date) AS source
+        ON target.snapshot_date = source.snapshot_date
+        WHEN MATCHED THEN UPDATE SET
+            audit_window_start = '{since_date}',
+            total_conversations = {accuracy['conversations']},
+            total_pairs = {accuracy['total_pairs']},
+            clean_pairs = {accuracy['clean_pairs']},
+            pairs_with_issues = {accuracy['pairs_with_issues']},
+            accuracy_pct = {accuracy['accuracy_pct']},
+            issue_breakdown = '{breakdown_json}',
+            created_at = current_timestamp()
+        WHEN NOT MATCHED THEN INSERT
+            (snapshot_date, audit_window_start, total_conversations, total_pairs,
+             clean_pairs, pairs_with_issues, accuracy_pct, issue_breakdown, created_at)
+        VALUES
+            (current_date(), '{since_date}', {accuracy['conversations']},
+             {accuracy['total_pairs']}, {accuracy['clean_pairs']},
+             {accuracy['pairs_with_issues']}, {accuracy['accuracy_pct']},
+             '{breakdown_json}', current_timestamp())
+    """
+    _, err = run_sql(insert_sql)
+    if err:
+        print(f"  WARNING: Could not persist accuracy: {err}")
+    else:
+        print(f"  ✓ Accuracy saved to {ACCURACY_TABLE}: {accuracy['accuracy_pct']}%")
+
+
 # ─── MAIN ─────────────────────────────────────────────────────────────────────
 
 
@@ -581,6 +666,14 @@ def main():
     if not benchmark_only:
         print(f"\n  ┌─ PHASE 2: Conversation Audit")
         audit_results = run_audit(since_date=since_date, dry_run=dry_run)
+
+        # Compute and persist accuracy
+        accuracy = compute_accuracy(audit_results)
+        if accuracy and not dry_run:
+            print(f"\n  ┌─ PHASE 3: Accuracy Metrics")
+            print(f"  Accuracy: {accuracy['accuracy_pct']}% "
+                  f"({accuracy['clean_pairs']}/{accuracy['total_pairs']} pairs clean)")
+            persist_accuracy(accuracy, since_date)
 
     duration = time.time() - start
     print_report(benchmark_results, audit_results, duration)
