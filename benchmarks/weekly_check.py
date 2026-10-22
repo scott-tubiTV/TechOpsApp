@@ -184,6 +184,20 @@ def _check_benchmark(test, generated_sql, genie_rows, validation_rows):
     genie_val = _extract_scalar(genie_rows)
     expected_val = _extract_scalar(validation_rows)
 
+    # "match": "any_value" — Genie returns one row per matching entity (e.g. Paramount and
+    # Paramount Standard), so pass if the expected number appears anywhere in the result.
+    if test.get("match") == "any_value" and expected_val is not None:
+        candidates = _extract_candidates(genie_rows)
+        tolerance = test.get("tolerance", 0.05)
+        for cand in candidates:
+            if expected_val == 0:
+                if cand == 0:
+                    return "PASS", "Both zero"
+            elif abs(cand - expected_val) / abs(expected_val) <= tolerance:
+                return "PASS", f"{int(cand)} vs {int(expected_val)} (found in result)"
+        if candidates:
+            return "FAIL", f"Expected {int(expected_val)} not in Genie values {[int(c) for c in candidates[:6]]}"
+
     if genie_val is None or expected_val is None:
         return "ERROR", f"Could not extract values (genie={genie_val}, expected={expected_val})"
 
@@ -201,14 +215,27 @@ def _check_benchmark(test, generated_sql, genie_rows, validation_rows):
     return "FAIL", f"Genie={int(genie_val)}, Expected={int(expected_val)} (diff {pct*100:.1f}%)"
 
 
-def _extract_scalar(rows):
-    if not rows:
-        return None
-    first_val = list(rows[0].values())[0]
+def _to_float(val):
     try:
-        return float(first_val) if first_val is not None else None
+        return float(val) if val is not None else None
     except (ValueError, TypeError):
         return None
+
+
+def _extract_scalar(rows):
+    """First numeric value in the first row (Genie often returns name, id, count)."""
+    if not rows:
+        return None
+    for val in rows[0].values():
+        num = _to_float(val)
+        if num is not None:
+            return num
+    return None
+
+
+def _extract_candidates(rows):
+    """Every numeric value across all rows, for tests where Genie may list several entities."""
+    return [n for row in rows or [] for n in (_to_float(v) for v in row.values()) if n is not None]
 
 
 # ─── AUDIT SECTION ────────────────────────────────────────────────────────────

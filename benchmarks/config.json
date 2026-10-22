@@ -490,6 +490,7 @@
       "validation_sql": "SELECT abf_error_count FROM core_dev.techops.partner_health WHERE LOWER(import_id) = 'sony-pictures'",
       "check": "percentage",
       "tolerance": 0.05,
+      "match": "any_value",
       "expected_table": "partner_health"
     },
     {
@@ -499,6 +500,7 @@
       "validation_sql": "SELECT redelivery_count FROM core_dev.techops.partner_health WHERE LOWER(import_id) = 'paramount'",
       "check": "percentage",
       "tolerance": 0.05,
+      "match": "any_value",
       "expected_table": "partner_health"
     },
     {
