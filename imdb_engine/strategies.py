@@ -90,7 +90,7 @@ class DirectLookupStrategy:
                 WHERE (it.content_type = '' OR it.content_type = ci.content_type)
                   AND (it.release_year = '' OR ci.release_year IS NULL
                        OR ABS(CAST(it.release_year AS INT) - ci.release_year) <= {self.config.year_tolerance})
-                ORDER BY idx, year_exact DESC, title_match
+                ORDER BY idx, year_exact DESC, title_match, ci.content_id
             """)
 
             # Keep best match per index
@@ -235,7 +235,8 @@ class CatalogMatchStrategy:
                                      WHEN m.year_match = 'year_close' THEN 1
                                      WHEN m.year_match = 'year_missing' THEN 2
                                      ELSE 3 END,
-                                CASE WHEN m.title_match = 'exact' THEN 0 ELSE 1 END
+                                CASE WHEN m.title_match = 'exact' THEN 0 ELSE 1 END,
+                                m.imdb_id
                         ) AS rn
                     FROM matched m
                     JOIN counted c ON m.idx = c.idx

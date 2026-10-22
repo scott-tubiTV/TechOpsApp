@@ -20,7 +20,6 @@ from conversation_store import (
 from tools.sony_matcher import render_content_id_matcher
 from tools.imdb_dupe_checker import render_imdb_dupe_checker
 from tools.genie_benchmark import render_genie_benchmark
-from dashboards_tab import render_dashboards_tab
 from sanity_check import check_sanity
 
 ADMIN_EMAILS = [
@@ -50,11 +49,6 @@ TOOLS = {
         "icon": "🎬",
         "description": "Find IMDB IDs, detect duplicates, and check policy conflicts",
         "renderer": render_imdb_dupe_checker,
-    },
-    "Dashboards": {
-        "icon": "📊",
-        "description": "Collections of saved queries you can refresh on demand",
-        "renderer": render_dashboards_tab,
     },
 }
 
@@ -863,70 +857,6 @@ def _render_chat(prompt=None, user_email=None):
             if msg.get("sql"):
                 with st.expander("View generated SQL"):
                     st.code(msg["sql"], language="sql")
-
-            if msg.get("sql") and msg.get("dataframe") is not None and has_tool_access(user_email):
-                save_key = f"save_dash_{i}"
-                if st.session_state.get(save_key) == "form":
-                    from dashboards_store import get_user_dashboards, create_dashboard
-                    from saved_queries_store import save_query as _save_q, detect_display_type
-                    dashboards = get_user_dashboards(user_email)
-                    dash_names = [d["name"] for d in dashboards]
-                    dash_ids = {d["name"]: d["dashboard_id"] for d in dashboards}
-
-                    with st.form(key=f"save_dash_form_{i}"):
-                        st.markdown("**Save to dashboard**")
-                        sr_title = st.text_input("Title", value=st.session_state.messages[i - 1]["content"][:60] if i > 0 else "")
-                        auto_display = detect_display_type(
-                            msg["dataframe"]["columns"],
-                            msg["dataframe"]["data"]
-                        )
-                        sr_display = st.selectbox(
-                            "Display type",
-                            ["metric", "bar_chart", "line_chart", "table"],
-                            index=["metric", "bar_chart", "line_chart", "table"].index(auto_display) if auto_display in ["metric", "bar_chart", "line_chart", "table"] else 3,
-                        )
-                        dash_options = dash_names + ["+ New dashboard"]
-                        sr_dash = st.selectbox("Dashboard", dash_options)
-                        sr_new_dash_name = ""
-                        if sr_dash == "+ New dashboard":
-                            sr_new_dash_name = st.text_input("New dashboard name")
-
-                        sr_col1, sr_col2 = st.columns(2)
-                        with sr_col1:
-                            sr_submitted = st.form_submit_button("Save", use_container_width=True, type="primary")
-                        with sr_col2:
-                            sr_cancelled = st.form_submit_button("Cancel", use_container_width=True)
-
-                        if sr_submitted and sr_title:
-                            if sr_dash == "+ New dashboard" and sr_new_dash_name:
-                                target_dash_id = create_dashboard(user_email, sr_new_dash_name)
-                            elif sr_dash in dash_ids:
-                                target_dash_id = dash_ids[sr_dash]
-                            else:
-                                target_dash_id = None
-
-                            prompt_text = st.session_state.messages[i - 1]["content"] if i > 0 else None
-                            _save_q(
-                                user_email=user_email,
-                                title=sr_title,
-                                sql_text=msg["sql"],
-                                display_type=sr_display,
-                                original_prompt=prompt_text,
-                                genie_space=msg.get("routed_to") or msg.get("_space"),
-                                dashboard_id=target_dash_id,
-                            )
-                            st.session_state[save_key] = "saved"
-                            st.toast(f"Saved to {sr_dash if sr_dash != '+ New dashboard' else sr_new_dash_name}")
-                            st.rerun()
-                        if sr_cancelled:
-                            st.session_state.pop(save_key, None)
-                            st.rerun()
-                elif st.session_state.get(save_key) == "saved":
-                    st.caption("Saved to dashboard.")
-                else:
-                    if st.button("📊 Save to dashboard", key=f"save_btn_{i}"):
-                        st.session_state[save_key] = "form"
-                        st.rerun()
 
             if msg.get("suggestions"):
                 st.caption("**Suggested questions:**")

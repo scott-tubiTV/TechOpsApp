@@ -26,6 +26,30 @@ from tools.sony_matcher import _query_avails, _build_index, match_title, _query_
 POLICY_WINDOWS = "core_prod.policydb_cdc.content_policy_windows"
 RICH_CONTENT = "ml_prod.common.rich_content"
 CONTENT_INFO = "core_prod.tubidw.content_info"
+METRICS_TABLE = "core_dev.techops.imdb_dupe_checker_metrics"
+
+# Suffixes that indicate channel variants of the same partner (e.g., lionsgate-original, lionsgate_linear)
+_PARTNER_SUFFIXES = re.compile(r"[-_](original|linear|us|uk|latam|intl|avod|svod|fast|digital|classics)$", re.IGNORECASE)
+
+
+def _partner_base(import_id):
+    """Extract the base partner slug, stripping known channel suffixes."""
+    if not import_id:
+        return ""
+    base = import_id.lower().strip()
+    while True:
+        stripped = _PARTNER_SUFFIXES.sub("", base)
+        if stripped == base:
+            break
+        base = stripped
+    return base
+
+
+def _same_partner(id_a, id_b):
+    """Check if two import_ids belong to the same partner family."""
+    if not id_a or not id_b:
+        return False
+    return _partner_base(id_a) == _partner_base(id_b)
 
 
 @st.cache_resource
@@ -78,6 +102,8 @@ def parse_csv_input(text):
         "release_year": ["release year", "release_year", "year"],
         "director": ["director"],
         "imdb_id": ["imdb_id", "imdb id", "imdb"],
+        "start_date": ["start date", "start_date", "license_start", "license start", "window start", "window_start"],
+        "end_date": ["end date", "end_date", "license_end", "license end", "window end", "window_end", "expiry", "expiry date"],
     }
     for field, keywords in header_keywords.items():
         for i, col in enumerate(first_row):
@@ -121,13 +147,27 @@ def parse_csv_input(text):
         if dir_idx is not None and dir_idx < len(row):
             director = row[dir_idx].strip()
 
-        # Pre-extracted IMDB ID (from Excel URL parsing)
+        # Pre-extracted IMDB ID (from Excel URL parsing or raw ID)
         known_imdb = ""
         imdb_idx = col_map.get("imdb_id")
         if imdb_idx is not None and imdb_idx < len(row):
             val = row[imdb_idx].strip()
-            if val.startswith("tt"):
+            if val.startswith("tt") and re.match(r"^tt\d{7,}$", val):
                 known_imdb = val
+            elif val:
+                # Try extracting from URL (e.g. https://www.imdb.com/title/tt1234567/)
+                known_imdb = _extract_imdb_id_from_url(val)
+
+        # Proposed policy window dates
+        start_date = ""
+        start_idx = col_map.get("start_date")
+        if start_idx is not None and start_idx < len(row):
+            start_date = _parse_date_value(row[start_idx].strip())
+
+        end_date = ""
+        end_idx = col_map.get("end_date")
+        if end_idx is not None and end_idx < len(row):
+            end_date = _parse_date_value(row[end_idx].strip())
 
         req = MatchRequest(
             title=title,
@@ -137,8 +177,29 @@ def parse_csv_input(text):
         )
         # Attach known IMDB ID as metadata for the pipeline
         req._known_imdb_id = known_imdb
+        # Attach proposed window if both dates present
+        if start_date and end_date:
+            req._proposed_window = (start_date, end_date)
+        else:
+            req._proposed_window = None
         results.append(req)
     return results
+
+
+def _parse_date_value(val):
+    """Try to parse a date string into YYYY-MM-DD format."""
+    if not val:
+        return ""
+    for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%m/%d/%y", "%d/%m/%Y", "%Y/%m/%d", "%B %d, %Y", "%b %d, %Y"):
+        try:
+            return datetime.strptime(val, fmt).strftime("%Y-%m-%d")
+        except ValueError:
+            continue
+    # Try pandas for more flexible parsing
+    try:
+        return pd.to_datetime(val).strftime("%Y-%m-%d")
+    except Exception:
+        return ""
 
 
 def _parse_excel_to_csv(uploaded_file):
@@ -188,6 +249,10 @@ def _parse_excel_to_csv(uploaded_file):
             col_renames[col] = "year"
         elif lower in ("director", "directors"):
             col_renames[col] = "director"
+        elif lower in ("start date", "start_date", "license_start", "license start", "window start", "window_start"):
+            col_renames[col] = "start_date"
+        elif lower in ("end date", "end_date", "license_end", "license end", "window end", "window_end", "expiry", "expiry date"):
+            col_renames[col] = "end_date"
         elif "imdb" in lower:
             imdb_col = col
 
@@ -208,7 +273,7 @@ def _parse_excel_to_csv(uploaded_file):
         df["type"] = df["type"].apply(_map_category_to_type)
 
     # Select only the columns we care about
-    keep_cols = [c for c in ["title", "type", "year", "director", "imdb_id"] if c in df.columns]
+    keep_cols = [c for c in ["title", "type", "year", "director", "imdb_id", "start_date", "end_date"] if c in df.columns]
     return df[keep_cols].to_csv(index=False)
 
 
@@ -239,6 +304,7 @@ def _find_duplicates(imdb_ids, sql_client, config):
     id_list = ", ".join(f"'{escape_sql(iid)}'" for iid in imdb_ids)
 
     # Try rich_content first (most complete mapping), fall back to content_info
+    # Filter out trailers — they share IMDB IDs with their parent title by design
     try:
         rows = sql_client.execute(f"""
             SELECT
@@ -252,6 +318,7 @@ def _find_duplicates(imdb_ids, sql_client, config):
             JOIN {config.content_info_table} ci ON ci.content_id = rc.tubi_video_id
             WHERE rc.imdb_id IN ({id_list})
               AND rc.tubi_video_id IS NOT NULL
+              AND LOWER(ci.content_type) != 'trailer'
         """)
     except Exception:
         # Fallback: use content_info imdb_id/program_imdb_id directly
@@ -266,6 +333,7 @@ def _find_duplicates(imdb_ids, sql_client, config):
             FROM {config.content_info_table}
             WHERE (imdb_id IN ({id_list}) OR program_imdb_id IN ({id_list}))
               AND content_id IS NOT NULL
+              AND LOWER(content_type) != 'trailer'
         """)
 
     dupes = {}
@@ -274,29 +342,159 @@ def _find_duplicates(imdb_ids, sql_client, config):
     return dupes
 
 
-def _check_policy_conflicts(content_ids, sql_client, config):
-    """Check for active policy windows on content_ids."""
+def _check_policy_conflicts(content_ids, sql_client, config, proposed_windows=None):
+    """Check for policy window conflicts on content_ids.
+
+    If proposed_windows is provided (dict of content_id → (start_date, end_date)),
+    checks for OVERLAP between proposed and existing windows.
+    Otherwise falls back to checking if existing windows are currently active.
+    """
     if not content_ids:
         return {}
     id_list = ", ".join(f"'{escape_sql(cid)}'" for cid in content_ids)
-    rows = sql_client.execute(f"""
-        SELECT
-            CAST(content_id AS STRING) AS content_id,
-            timespan,
-            country_list,
-            deal_id
-        FROM {config.policy_windows_table}
-        WHERE CAST(content_id AS STRING) IN ({id_list})
-          AND UPPER(timespan) > CAST(current_timestamp() AS STRING)
-    """)
+
+    if proposed_windows:
+        # Fetch all windows (not just active today) for overlap comparison
+        rows = sql_client.execute(f"""
+            SELECT
+                CAST(content_id AS STRING) AS content_id,
+                timespan,
+                country_list,
+                deal_id
+            FROM {config.policy_windows_table}
+            WHERE CAST(content_id AS STRING) IN ({id_list})
+        """)
+    else:
+        # Default: only windows active now
+        rows = sql_client.execute(f"""
+            SELECT
+                CAST(content_id AS STRING) AS content_id,
+                timespan,
+                country_list,
+                deal_id
+            FROM {config.policy_windows_table}
+            WHERE CAST(content_id AS STRING) IN ({id_list})
+              AND UPPER(timespan) > CAST(current_timestamp() AS STRING)
+        """)
+
+    if not proposed_windows:
+        policies = {}
+        for r in rows:
+            policies.setdefault(r["content_id"], []).append(r)
+        return policies
+
+    # Window overlap detection: incoming_start < existing_end AND incoming_end > existing_start
     policies = {}
     for r in rows:
-        policies.setdefault(r["content_id"], []).append(r)
+        cid = r["content_id"]
+        window = proposed_windows.get(cid)
+        if not window:
+            continue
+        proposed_start, proposed_end = window
+        existing_timespan = r.get("timespan", "")
+        # timespan format is typically "start/end" or just the end date
+        # Parse to extract existing window bounds
+        existing_start, existing_end = _parse_timespan(existing_timespan)
+        if not existing_end:
+            continue
+        # Overlap check
+        if proposed_start < existing_end and proposed_end > existing_start:
+            policies.setdefault(cid, []).append(r)
+
     return policies
 
 
-def _build_display_results(requests, match_results, dupes, policies):
-    """Combine match results with dupe/policy info into display rows."""
+def _parse_timespan(timespan_str):
+    """Parse policy timespan into (start, end) date strings.
+
+    Timespan can be 'start/end' (ISO interval) or a single timestamp (treated as end).
+    Returns (start_str, end_str) comparable with < and >.
+    """
+    if not timespan_str:
+        return ("", "")
+    if "/" in timespan_str:
+        parts = timespan_str.split("/", 1)
+        return (parts[0][:10], parts[1][:10])
+    # Single value = end date
+    return ("1900-01-01", timespan_str[:10])
+
+
+def _persist_run_metrics(sql_client, config, metrics):
+    """Write run-level metrics to the Delta table."""
+    try:
+        sql_client.execute(f"""
+            CREATE TABLE IF NOT EXISTS {config.metrics_table} (
+                run_date DATE,
+                user_email STRING,
+                import_id STRING,
+                titles_submitted INT,
+                file_provided INT,
+                matched_auto_high INT,
+                matched_auto_medium_low INT,
+                verified_confirmed INT,
+                verified_manual_override INT,
+                verified_skipped INT,
+                unmatched INT,
+                duplicates_detected INT,
+                conflicts_detected INT,
+                auto_accuracy_pct DOUBLE,
+                verification_accuracy_pct DOUBLE,
+                created_at TIMESTAMP
+            ) USING DELTA
+        """)
+    except Exception:
+        pass
+
+    m = metrics
+    auto_denom = m["titles_submitted"] - m["file_provided"]
+    auto_acc = round((m["matched_auto_high"] / auto_denom) * 100, 1) if auto_denom > 0 else None
+    verify_denom = m["verified_confirmed"] + m["verified_manual_override"]
+    verify_acc = round((m["verified_confirmed"] / verify_denom) * 100, 1) if verify_denom > 0 else None
+
+    import_val = f"'{escape_sql(m['import_id'])}'" if m.get("import_id") else "NULL"
+    auto_acc_val = str(auto_acc) if auto_acc is not None else "NULL"
+    verify_acc_val = str(verify_acc) if verify_acc is not None else "NULL"
+
+    try:
+        sql_client.execute(f"""
+            INSERT INTO {config.metrics_table}
+            (run_date, user_email, import_id, titles_submitted, file_provided,
+             matched_auto_high, matched_auto_medium_low,
+             verified_confirmed, verified_manual_override, verified_skipped,
+             unmatched, duplicates_detected, conflicts_detected,
+             auto_accuracy_pct, verification_accuracy_pct, created_at)
+            VALUES (
+                current_date(),
+                '{escape_sql(m["user_email"])}',
+                {import_val},
+                {m["titles_submitted"]},
+                {m["file_provided"]},
+                {m["matched_auto_high"]},
+                {m["matched_auto_medium_low"]},
+                {m["verified_confirmed"]},
+                {m["verified_manual_override"]},
+                {m["verified_skipped"]},
+                {m["unmatched"]},
+                {m["duplicates_detected"]},
+                {m["conflicts_detected"]},
+                {auto_acc_val},
+                {verify_acc_val},
+                current_timestamp()
+            )
+        """)
+    except Exception:
+        pass
+
+
+def _build_display_results(requests, match_results, dupes, policies, selected_import_id=None, cid_import_map=None):
+    """Combine match results with dupe/policy info into display rows.
+
+    Splits backend matches into two categories:
+    - In_Library: the selected partner already has this title (same import_id)
+    - is_duplicate: a DIFFERENT partner has this title (different import_id)
+    """
+    if cid_import_map is None:
+        cid_import_map = {}
     rows = []
     for req, result in zip(requests, match_results):
         row = {
@@ -308,6 +506,7 @@ def _build_display_results(requests, match_results, dupes, policies):
             "imdb_title": result.imdb_title or "",
             "confidence": result.confidence.value,
             "match_method": result.match_method.value,
+            "in_library": False,
             "is_duplicate": False,
             "duplicate_content_id": "",
             "duplicate_title": "",
@@ -324,19 +523,77 @@ def _build_display_results(requests, match_results, dupes, policies):
         # Dupe detection
         imdb_id = result.imdb_id
         if imdb_id and imdb_id in dupes:
-            other_dupes = [d for d in dupes[imdb_id] if d["existing_content_id"] != result.content_id]
-            if other_dupes:
-                row["is_duplicate"] = True
-                best = next((d for d in other_dupes if str(d.get("active", "")).lower() == "true"), other_dupes[0])
-                row["duplicate_content_id"] = best["existing_content_id"]
-                row["duplicate_title"] = best.get("existing_title", "")
-                row["duplicate_active"] = str(best.get("active", "")).lower() == "true"
-                row["duplicate_import_id"] = best.get("import_id", "")
+            all_matches = dupes[imdb_id]
 
-                if best["existing_content_id"] in policies:
-                    row["has_policy_conflict"] = True
-                    windows = policies[best["existing_content_id"]]
-                    row["policy_details"] = f"{len(windows)} active window(s): {windows[0].get('country_list', '')}"
+            # Split matches: same partner vs other partners
+            # Uses partner-family matching (lionsgate == lionsgate-original == lionsgate_linear)
+            if selected_import_id:
+                own_partner_matches = [
+                    d for d in all_matches
+                    if _same_partner(d.get("import_id"), selected_import_id)
+                ]
+                other_partner_matches = [
+                    d for d in all_matches
+                    if not _same_partner(d.get("import_id"), selected_import_id)
+                ]
+            else:
+                own_partner_matches = []
+                other_partner_matches = all_matches
+
+            # Fallback: if the IMDB engine already resolved to a content_id in this dupe set,
+            # treat that entry as own-partner (it's clearly already in the library)
+            if not own_partner_matches and result.content_id:
+                engine_match = [d for d in all_matches if str(d.get("existing_content_id")) == str(result.content_id)]
+                if engine_match:
+                    own_partner_matches = engine_match
+                    other_partner_matches = [d for d in all_matches if str(d.get("existing_content_id")) != str(result.content_id)]
+
+            # In_Library: partner already has this title — only populate content_id in this case
+            if own_partner_matches:
+                row["in_library"] = True
+                best_own = next(
+                    (d for d in own_partner_matches if str(d.get("active", "")).lower() == "true"),
+                    own_partner_matches[0],
+                )
+                row["content_id"] = best_own["existing_content_id"]
+
+            # content_id only shows when in_library is confirmed
+            if not row["in_library"]:
+                row["content_id"] = ""
+
+            # Duplicate: a different partner has this title — one row per duplicate
+            if other_partner_matches:
+                for dupe in other_partner_matches:
+                    dupe_row = dict(row)
+                    dupe_row["is_duplicate"] = True
+                    dupe_row["duplicate_content_id"] = dupe["existing_content_id"]
+                    dupe_row["duplicate_title"] = dupe.get("existing_title", "")
+                    dupe_row["duplicate_active"] = str(dupe.get("active", "")).lower() == "true"
+                    dupe_row["duplicate_import_id"] = dupe.get("import_id", "")
+
+                    if dupe["existing_content_id"] in policies:
+                        dupe_row["has_policy_conflict"] = True
+                        windows = policies[dupe["existing_content_id"]]
+                        dupe_row["policy_details"] = f"{len(windows)} active window(s): {windows[0].get('country_list', '')}"
+
+                    rows.append(dupe_row)
+                # If title is also in_library, emit the base row too (no duplicate info)
+                if row["in_library"]:
+                    rows.append(row)
+            else:
+                rows.append(row)
+            continue
+
+        # If dupe detection didn't trigger but we have a content_id from the engine,
+        # check if it belongs to the selected partner (in_library even without dupes dict hit)
+        if not row["in_library"] and result.content_id and selected_import_id:
+            cid_import_id = cid_import_map.get(str(result.content_id))
+            if cid_import_id and _same_partner(cid_import_id, selected_import_id):
+                row["in_library"] = True
+
+        # content_id column only populates when the title is confirmed in the partner's library
+        if not row["in_library"]:
+            row["content_id"] = ""
 
         rows.append(row)
     return rows
@@ -518,16 +775,85 @@ def render_imdb_dupe_checker():
             for dupe_list in dupes.values():
                 for d in dupe_list:
                     dupe_cids.add(d["existing_content_id"])
-            policies = _check_policy_conflicts(list(dupe_cids), sql_client, config)
+
+            # Build proposed_windows: map each dupe content_id to the incoming title's window
+            proposed_windows = None
+            has_any_window = any(getattr(req, "_proposed_window", None) for req in requests)
+            if has_any_window:
+                proposed_windows = {}
+                # Map imdb_id → proposed window from the incoming requests
+                imdb_to_window = {}
+                for req, result in zip(requests, match_results):
+                    window = getattr(req, "_proposed_window", None)
+                    if window and result.imdb_id and "vs" not in result.imdb_id:
+                        imdb_to_window[result.imdb_id] = window
+                # Map each dupe content_id to the proposed window of the title that matched it
+                for imdb_id, dupe_list in dupes.items():
+                    window = imdb_to_window.get(imdb_id)
+                    if window:
+                        for d in dupe_list:
+                            proposed_windows[d["existing_content_id"]] = window
+
+            policies = _check_policy_conflicts(list(dupe_cids), sql_client, config, proposed_windows)
+
+            # Build content_id → import_id map for engine-resolved IDs not in dupes
+            cid_import_map = {}
+            if selected_import_id:
+                # Collect content_ids from dupes
+                for dupe_list in dupes.values():
+                    for d in dupe_list:
+                        cid_import_map[str(d["existing_content_id"])] = d.get("import_id", "")
+                # Find engine-resolved content_ids NOT already in the map
+                missing_cids = [
+                    str(r.content_id) for r in match_results
+                    if r.content_id and str(r.content_id) not in cid_import_map
+                ]
+                if missing_cids:
+                    cid_list = ", ".join(f"'{escape_sql(c)}'" for c in set(missing_cids))
+                    try:
+                        ci_rows = sql_client.execute(f"""
+                            SELECT CAST(content_id AS STRING) AS content_id, import_id
+                            FROM {config.content_info_table}
+                            WHERE content_id IN ({cid_list})
+                        """)
+                        for r in ci_rows:
+                            cid_import_map[str(r["content_id"])] = r.get("import_id", "")
+                    except Exception:
+                        pass
 
             progress.empty()
 
             # Build display results
-            display_rows = _build_display_results(requests, match_results, dupes, policies)
+            display_rows = _build_display_results(requests, match_results, dupes, policies, selected_import_id, cid_import_map)
             st.session_state.dupe_results = display_rows
             st.session_state.dupe_match_results = match_results
             st.session_state.dupe_requests = requests
             st.session_state.dupe_verify_decisions = {}
+
+            # Capture run metrics baseline
+            st.session_state.dupe_run_metrics = {
+                "user_email": _get_user_email(),
+                "import_id": selected_import_id or "",
+                "titles_submitted": len(requests),
+                "file_provided": len(pre_matched),
+                "matched_auto_high": sum(
+                    1 for r in match_results
+                    if r.confidence == Confidence.HIGH and r.imdb_id
+                    and r.metadata.get("source") != "file_provided"
+                ),
+                "matched_auto_medium_low": sum(
+                    1 for r in match_results
+                    if r.confidence in (Confidence.MEDIUM, Confidence.LOW, Confidence.CONFLICT)
+                    and r.imdb_id
+                ),
+                "unmatched": sum(1 for r in match_results if not r.imdb_id),
+                "duplicates_detected": len([r for r in display_rows if r["is_duplicate"]]),
+                "conflicts_detected": len([r for r in display_rows if r["has_policy_conflict"]]),
+                "verified_confirmed": 0,
+                "verified_manual_override": 0,
+                "verified_skipped": 0,
+                "metrics_persisted": False,
+            }
 
         except Exception as e:
             progress.empty()
@@ -544,7 +870,7 @@ def render_imdb_dupe_checker():
     # Summary metrics
     total = len(results)
     matched_imdb = len([r for r in results if r["imdb_id"] and "vs" not in r["imdb_id"]])
-    verified = len([r for r in results if r["confidence"] == "VERIFIED"])
+    in_library = len([r for r in results if r["in_library"]])
     duplicates = len([r for r in results if r["is_duplicate"]])
     conflicts = len([r for r in results if r["has_policy_conflict"]])
     needs_review = len([r for r in results if r["confidence"] in ("LOW", "MEDIUM", "CONFLICT")])
@@ -552,8 +878,8 @@ def render_imdb_dupe_checker():
     cols = st.columns(6)
     cols[0].metric("Total", total, help="Total number of titles submitted for checking.")
     cols[1].metric("IMDB Matched", matched_imdb, help="Titles successfully matched to an IMDB ID via content_info lookup, catalog search, or file-provided ID.")
-    cols[2].metric("Verified", verified, help="Matches manually confirmed by a user in the verification wizard. These are remembered and auto-resolve on future runs.")
-    cols[3].metric("Duplicates", duplicates, help="Titles whose IMDB ID already exists in Tubi's backend under a different content_id — potential duplicate ingestion.")
+    cols[2].metric("In Library", in_library, help="Titles the selected partner already has in Tubi's backend (same import_id). No new ingestion needed.")
+    cols[3].metric("Duplicates", duplicates, help="Titles that exist under a DIFFERENT partner's import_id — potential duplicate ingestion from another source.")
     cols[4].metric("Conflicts", conflicts, help="Duplicates that have active policy windows (licensing deals) on the existing content_id — ingesting again may violate rights.")
     cols[5].metric("Needs Review", needs_review, help="LOW, MEDIUM, or CONFLICT confidence matches that should be manually verified before trusting the result.")
 
@@ -567,18 +893,22 @@ def render_imdb_dupe_checker():
 
     if verify_indices:
         _render_verification_wizard(verify_indices, match_results, requests)
+    else:
+        # No verifications needed — persist metrics immediately
+        _finalize_run_metrics()
 
     # Results tabs
     df = pd.DataFrame(results)
     display_cols = [
         "title", "type", "release_year", "imdb_id", "confidence",
-        "content_id", "is_duplicate", "duplicate_content_id",
-        "duplicate_title", "has_policy_conflict", "policy_details",
+        "content_id", "in_library", "is_duplicate", "duplicate_content_id",
+        "duplicate_title", "duplicate_import_id", "has_policy_conflict", "policy_details",
     ]
     display_cols = [c for c in display_cols if c in df.columns]
 
-    tab_all, tab_dupes, tab_review, tab_unmatched = st.tabs([
+    tab_all, tab_library, tab_dupes, tab_review, tab_unmatched = st.tabs([
         "All Results",
+        f"In Library ({in_library})",
         f"Duplicates ({duplicates})",
         f"Needs Review ({needs_review})",
         f"No Match ({total - matched_imdb})",
@@ -587,12 +917,19 @@ def render_imdb_dupe_checker():
     with tab_all:
         st.dataframe(df[display_cols], use_container_width=True, hide_index=True)
 
+    with tab_library:
+        lib_df = df[df["in_library"] == True]
+        if not lib_df.empty:
+            st.dataframe(lib_df[display_cols], use_container_width=True, hide_index=True)
+        else:
+            st.info("No titles from this partner already in library.")
+
     with tab_dupes:
         dupe_df = df[df["is_duplicate"] == True]
         if not dupe_df.empty:
             st.dataframe(dupe_df[display_cols], use_container_width=True, hide_index=True)
         else:
-            st.success("No duplicates found.")
+            st.success("No duplicates from other partners found.")
 
     with tab_review:
         review_df = df[df["confidence"].isin(["LOW", "MEDIUM", "CONFLICT"])]
@@ -610,16 +947,19 @@ def render_imdb_dupe_checker():
 
     # Downloads
     st.divider()
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3, col4, col5 = st.columns(5)
     with col1:
         st.download_button("Download all results", df.to_csv(index=False), "imdb_dupe_check_results.csv", "text/csv")
     with col2:
+        if in_library > 0:
+            st.download_button("Download in library", df[df["in_library"] == True].to_csv(index=False), "in_library.csv", "text/csv")
+    with col3:
         if duplicates > 0:
             st.download_button("Download duplicates", df[df["is_duplicate"] == True].to_csv(index=False), "duplicates.csv", "text/csv")
-    with col3:
+    with col4:
         if needs_review > 0:
             st.download_button("Download needs review", df[df["confidence"].isin(["LOW", "MEDIUM", "CONFLICT"])].to_csv(index=False), "needs_review.csv", "text/csv")
-    with col4:
+    with col5:
         if total - matched_imdb > 0:
             st.download_button("Download unmatched", df[df["imdb_id"] == ""].to_csv(index=False), "unmatched.csv", "text/csv")
 
@@ -693,6 +1033,40 @@ def _render_reupload_section():
                 st.success(f"Saved {saved} verified IMDB IDs. These will auto-resolve on future runs.")
 
 
+def _finalize_run_metrics():
+    """Compute final verification stats and persist metrics once per run."""
+    metrics = st.session_state.get("dupe_run_metrics")
+    if not metrics or metrics.get("metrics_persisted"):
+        return
+
+    # Count verification outcomes from decisions
+    decisions = st.session_state.get("dupe_verify_decisions", {})
+    match_results = st.session_state.get("dupe_match_results", [])
+    confirmed = 0
+    manual_override = 0
+    skipped = 0
+    for idx, decision in decisions.items():
+        if decision == "__skip__":
+            skipped += 1
+        elif idx < len(match_results):
+            proposed = match_results[idx].imdb_id
+            if decision == proposed:
+                confirmed += 1
+            else:
+                manual_override += 1
+
+    metrics["verified_confirmed"] = confirmed
+    metrics["verified_manual_override"] = manual_override
+    metrics["verified_skipped"] = skipped
+    metrics["metrics_persisted"] = True
+
+    try:
+        _, _, sql_client, config = _get_engine()
+        _persist_run_metrics(sql_client, config, metrics)
+    except Exception:
+        pass
+
+
 def _render_verification_wizard(verify_indices, match_results, requests):
     """Render the verification wizard for MEDIUM/LOW/CONFLICT matches."""
     decisions = st.session_state.get("dupe_verify_decisions", {})
@@ -701,6 +1075,9 @@ def _render_verification_wizard(verify_indices, match_results, requests):
     completed = total_to_verify - len(unresolved)
 
     if not unresolved:
+        # Persist metrics once all verifications are done
+        _finalize_run_metrics()
+
         col_done, col_back = st.columns([5, 1])
         with col_done:
             st.markdown(f"""

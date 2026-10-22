@@ -11,8 +11,9 @@ class IMDBEngineConfig:
     imdb_catalog_table: str = "core_prod.imdb.imdb_title_essential_v2"
     policy_windows_table: str = "core_prod.policydb_cdc.content_policy_windows"
     verifications_table: str = "core_dev.techops.imdb_verifications"
+    metrics_table: str = "core_dev.techops.imdb_dupe_checker_metrics"
     wait_timeout: str = "50s"
-    poll_interval: int = 2
-    poll_max_attempts: int = 30
+    poll_interval: int = 3
+    poll_max_attempts: int = 120
     batch_size: int = 100
     year_tolerance: int = 1
