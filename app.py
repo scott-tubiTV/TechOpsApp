@@ -52,7 +52,13 @@ TOOLS = {
     },
 }
 
-GENIE_SPACES = {
+ALL_GENIE_SPACES = {
+    "Backlog": {
+        "id": os.environ.get("GENIE_SPACE_BACKLOG", "01f1ce6a6277168eb56328bf39c68712"),
+        "description": "Content pipeline backlog from DSA's CDP Backlog Data Model: pipeline stage, ABF queue, metadata, refresh, policy windows, deals, launch failures, publish readiness",
+        "keywords": ["backlog", "pipeline", "stage", "abf", "queue", "metadata", "refresh", "window", "deal", "fee", "launch", "publish", "ready to publish", "blocking", "gate", "how many titles", "in window", "creator"],
+        "color": "#a855f7",
+    },
     "Content Metrics": {
         "id": os.environ.get("GENIE_SPACE_TECHOPS", "01f18b97de0117d8af61d23c1eaa8d7e"),
         "description": "Ops metrics: policy snapshots, avails status, imports, images, partners, QA/ABF, workload, content refresh",
@@ -62,7 +68,7 @@ GENIE_SPACES = {
     "Redeliveries": {
         "id": os.environ.get("GENIE_SPACE_REDELIVERIES", "01f18b97de2f122eb27a1b307d68e50e"),
         "description": "Redelivery detail: per-title breakdown by reason, modality, age, partner, and dismissal status",
-        "keywords": ["redelivery", "redeliver", "dismissed", "modality", "video file", "subtitle file", "image file", "overdue", "backlog", "oldest", "reason", "open redeliveries"],
+        "keywords": ["redelivery", "redeliver", "dismissed", "modality", "video file", "subtitle file", "image file", "overdue", "oldest", "reason", "open redeliveries"],
         "color": "#f59e0b",
     },
     "Dupe Checker V2": {
@@ -85,11 +91,16 @@ GENIE_SPACES = {
     },
 }
 
+# Spaces the router and UI use. Content Metrics, Dupe Checker V2, Partner Detail and Content Library
+# are switched off while Argo is pointed at the DSA backlog data model; add a name here to re-enable.
+ENABLED_SPACES = ["Backlog", "Redeliveries"]
+GENIE_SPACES = {name: cfg for name, cfg in ALL_GENIE_SPACES.items() if name in ENABLED_SPACES}
+
 SUGGESTION_CARDS = [
-    "How many new avails were created this month by content type?",
-    "How many open redeliveries are there by asset type?",
-    "Which partners have the highest error rate?",
     "How many titles are in the ABF review queue right now?",
+    "How many titles are in each pipeline stage?",
+    "How many titles are ready to publish?",
+    "How many open redeliveries are there by asset type?",
 ]
 
 st.set_page_config(
@@ -421,7 +432,8 @@ def _load_past_conversation(conversation_id, user_email):
         return
     st.session_state.messages = conv["messages"]
     st.session_state.argo_conversation_id = conv["conversation_id"]
-    st.session_state.active_space = conv.get("space_name") or list(GENIE_SPACES.keys())[0]
+    saved_space = conv.get("space_name")
+    st.session_state.active_space = saved_space if saved_space in GENIE_SPACES else list(GENIE_SPACES.keys())[0]
     st.session_state.conversation_id = None
     st.session_state.active_tool = None
 
@@ -875,7 +887,7 @@ def _render_chat(prompt=None, user_email=None):
                         help_text = "Helpful — saves as benchmark" if admin else "Helpful"
                         if st.button("👍", key=f"up_{i}", help=help_text):
                             client = get_genie_client()
-                            space_id = GENIE_SPACES[msg.get("_space", st.session_state.active_space)]["id"]
+                            space_id = ALL_GENIE_SPACES[msg.get("_space", st.session_state.active_space)]["id"]
                             if msg.get("_message_id") and msg.get("_conversation_id"):
                                 try:
                                     client.submit_feedback(space_id, msg["_conversation_id"], msg["_message_id"], "POSITIVE")
@@ -897,7 +909,7 @@ def _render_chat(prompt=None, user_email=None):
                             else:
                                 if msg.get("_message_id") and msg.get("_conversation_id"):
                                     client = get_genie_client()
-                                    space_id = GENIE_SPACES[msg.get("_space", st.session_state.active_space)]["id"]
+                                    space_id = ALL_GENIE_SPACES[msg.get("_space", st.session_state.active_space)]["id"]
                                     try:
                                         client.submit_feedback(space_id, msg["_conversation_id"], msg["_message_id"], "NEGATIVE")
                                     except Exception:
@@ -919,7 +931,7 @@ def _render_chat(prompt=None, user_email=None):
                         if st.button("Send", key=f"submit_reason_{i}", type="primary"):
                             if msg.get("_message_id") and msg.get("_conversation_id"):
                                 client = get_genie_client()
-                                space_id = GENIE_SPACES[msg.get("_space", st.session_state.active_space)]["id"]
+                                space_id = ALL_GENIE_SPACES[msg.get("_space", st.session_state.active_space)]["id"]
                                 try:
                                     client.submit_feedback(space_id, msg["_conversation_id"], msg["_message_id"], "NEGATIVE")
                                 except Exception:
@@ -931,7 +943,7 @@ def _render_chat(prompt=None, user_email=None):
                         if st.button("Skip", key=f"skip_reason_{i}"):
                             if msg.get("_message_id") and msg.get("_conversation_id"):
                                 client = get_genie_client()
-                                space_id = GENIE_SPACES[msg.get("_space", st.session_state.active_space)]["id"]
+                                space_id = ALL_GENIE_SPACES[msg.get("_space", st.session_state.active_space)]["id"]
                                 try:
                                     client.submit_feedback(space_id, msg["_conversation_id"], msg["_message_id"], "NEGATIVE")
                                 except Exception:

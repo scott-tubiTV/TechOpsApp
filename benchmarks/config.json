@@ -1,20 +1,143 @@
 {
   "spaces": {
     "Content Metrics": {
-      "id": "01f18b97de0117d8af61d23c1eaa8d7e"
+      "id": "01f18b97de0117d8af61d23c1eaa8d7e",
+      "enabled": false
     },
     "Redeliveries": {
       "id": "01f18b97de2f122eb27a1b307d68e50e"
     },
     "Partner Detail": {
-      "id": "01f1912d11a91341b59b2836ca3777c6"
+      "id": "01f1912d11a91341b59b2836ca3777c6",
+      "enabled": false
     },
     "Content Library": {
-      "id": "01f1951ff07e199aa6d9c0718f342e35"
+      "id": "01f1951ff07e199aa6d9c0718f342e35",
+      "enabled": false
+    },
+    "Backlog": {
+      "id": "01f1ce6a6277168eb56328bf39c68712"
     }
   },
   "warehouse_id": "a6b9541289d75c6e",
   "tests": [
+    {
+      "id": "backlog_total_titles",
+      "question": "How many titles are in the latest backlog snapshot?",
+      "space": "Backlog",
+      "validation_sql": "SELECT COUNT(*) as answer FROM core_dev.techops.backlog_snapshot WHERE ds = (SELECT MAX(ds) FROM core_dev.techops.backlog_snapshot)",
+      "check": "percentage",
+      "tolerance": 0.02,
+      "expected_table": "backlog_snapshot"
+    },
+    {
+      "id": "backlog_abf_review_queue",
+      "question": "How many titles are in the ABF review queue right now?",
+      "space": "Backlog",
+      "validation_sql": "SELECT COUNT(*) as answer FROM core_dev.techops.backlog_snapshot WHERE ds = (SELECT MAX(ds) FROM core_dev.techops.backlog_snapshot) AND assessment_status IN ('PENDING_REVIEW','INTERNAL_REVIEW')",
+      "check": "percentage",
+      "tolerance": 0.02,
+      "expected_table": "backlog_snapshot"
+    },
+    {
+      "id": "backlog_ready_to_publish",
+      "question": "How many titles are at the Ready to Publish stage?",
+      "space": "Backlog",
+      "validation_sql": "SELECT COUNT(*) as answer FROM core_dev.techops.backlog_snapshot WHERE ds = (SELECT MAX(ds) FROM core_dev.techops.backlog_snapshot) AND pipeline_stage = 'Ready to Publish'",
+      "check": "percentage",
+      "tolerance": 0.02,
+      "expected_table": "backlog_snapshot"
+    },
+    {
+      "id": "backlog_published",
+      "question": "How many titles are in the Published stage?",
+      "space": "Backlog",
+      "validation_sql": "SELECT COUNT(*) as answer FROM core_dev.techops.backlog_snapshot WHERE ds = (SELECT MAX(ds) FROM core_dev.techops.backlog_snapshot) AND pipeline_stage = 'Published'",
+      "check": "percentage",
+      "tolerance": 0.02,
+      "expected_table": "backlog_snapshot"
+    },
+    {
+      "id": "backlog_in_refresh",
+      "question": "How many titles are in the In Refresh stage?",
+      "space": "Backlog",
+      "validation_sql": "SELECT COUNT(*) as answer FROM core_dev.techops.backlog_snapshot WHERE ds = (SELECT MAX(ds) FROM core_dev.techops.backlog_snapshot) AND pipeline_stage = 'In Refresh'",
+      "check": "percentage",
+      "tolerance": 0.02,
+      "expected_table": "backlog_snapshot"
+    },
+    {
+      "id": "backlog_launch_failed",
+      "question": "How many titles have a failed launch?",
+      "space": "Backlog",
+      "validation_sql": "SELECT COUNT(*) as answer FROM core_dev.techops.backlog_snapshot WHERE ds = (SELECT MAX(ds) FROM core_dev.techops.backlog_snapshot) AND is_launch_failed",
+      "check": "percentage",
+      "tolerance": 0.02,
+      "expected_table": "backlog_snapshot"
+    },
+    {
+      "id": "backlog_creator_titles",
+      "question": "How many creator titles are in the backlog?",
+      "space": "Backlog",
+      "validation_sql": "SELECT COUNT(*) as answer FROM core_dev.techops.backlog_snapshot WHERE ds = (SELECT MAX(ds) FROM core_dev.techops.backlog_snapshot) AND is_creator",
+      "check": "percentage",
+      "tolerance": 0.02,
+      "expected_table": "backlog_snapshot"
+    },
+    {
+      "id": "backlog_in_window",
+      "question": "How many titles are currently in a US policy window?",
+      "space": "Backlog",
+      "validation_sql": "SELECT COUNT(*) as answer FROM core_dev.techops.backlog_snapshot WHERE ds = (SELECT MAX(ds) FROM core_dev.techops.backlog_snapshot) AND window_status = 'In Window'",
+      "check": "percentage",
+      "tolerance": 0.02,
+      "expected_table": "backlog_snapshot"
+    },
+    {
+      "id": "backlog_movies",
+      "question": "How many movies are in the backlog?",
+      "space": "Backlog",
+      "validation_sql": "SELECT COUNT(*) as answer FROM core_dev.techops.backlog_snapshot WHERE ds = (SELECT MAX(ds) FROM core_dev.techops.backlog_snapshot) AND content_type = 'movie'",
+      "check": "percentage",
+      "tolerance": 0.02,
+      "expected_table": "backlog_snapshot"
+    },
+    {
+      "id": "backlog_programs_abf_queue",
+      "question": "How many programs are in the ABF review queue?",
+      "space": "Backlog",
+      "validation_sql": "SELECT COUNT(DISTINCT program_id) as answer FROM core_dev.techops.backlog_snapshot WHERE ds = (SELECT MAX(ds) FROM core_dev.techops.backlog_snapshot) AND assessment_status IN ('PENDING_REVIEW','INTERNAL_REVIEW')",
+      "check": "percentage",
+      "tolerance": 0.02,
+      "expected_table": "backlog_snapshot"
+    },
+    {
+      "id": "backlog_committed_fees",
+      "question": "What is the total committed deal fee across programs in the latest snapshot?",
+      "space": "Backlog",
+      "validation_sql": "SELECT SUM(total_committed_fee_all_territories) as answer FROM core_dev.techops.backlog_snapshot WHERE ds = (SELECT MAX(ds) FROM core_dev.techops.backlog_snapshot) AND is_program_representative",
+      "check": "percentage",
+      "tolerance": 0.02,
+      "expected_table": "backlog_snapshot"
+    },
+    {
+      "id": "backlog_has_open_redelivery",
+      "question": "How many titles have an open redelivery?",
+      "space": "Backlog",
+      "validation_sql": "SELECT COUNT(*) as answer FROM core_dev.techops.backlog_snapshot WHERE ds = (SELECT MAX(ds) FROM core_dev.techops.backlog_snapshot) AND has_open_redelivery",
+      "check": "percentage",
+      "tolerance": 0.02,
+      "expected_table": "backlog_snapshot"
+    },
+    {
+      "id": "backlog_stage_table",
+      "question": "Which pipeline stage has the most titles?",
+      "space": "Backlog",
+      "validation_sql": "SELECT COUNT(*) as answer FROM core_dev.techops.backlog_snapshot WHERE ds = (SELECT MAX(ds) FROM core_dev.techops.backlog_snapshot)",
+      "check": "table_used",
+      "tolerance": 0.02,
+      "expected_table": "backlog_snapshot"
+    },
     {
       "id": "avails_new_this_month",
       "question": "How many new avails were created this month?",
@@ -179,7 +302,7 @@
       "space": "Content Metrics",
       "validation_sql": "SELECT COUNT(DISTINCT content_id) as answer FROM core_dev.techops.policy_window_snapshots WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM core_dev.techops.policy_window_snapshots) AND window_end >= date_trunc('month', current_date()) AND window_end < dateadd(MONTH, 1, date_trunc('month', current_date())) AND policy_disabled = false",
       "check": "percentage",
-      "tolerance": 0.10,
+      "tolerance": 0.1,
       "expected_table": "policy_window_snapshots"
     },
     {
@@ -336,7 +459,7 @@
       "space": "Content Metrics",
       "validation_sql": "SELECT SUM(files_received_7d) as answer FROM core_dev.techops.ops_weekly_workload WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM core_dev.techops.ops_weekly_workload)",
       "check": "percentage",
-      "tolerance": 0.10,
+      "tolerance": 0.1,
       "expected_table": "ops_weekly_workload"
     },
     {
@@ -371,7 +494,7 @@
       "space": "Content Metrics",
       "validation_sql": "SELECT COUNT(*) as answer FROM core_dev.techops.partner_title_status WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM core_dev.techops.partner_title_status) AND has_content_id = false",
       "check": "percentage",
-      "tolerance": 0.10,
+      "tolerance": 0.1,
       "expected_table": "partner_title_status"
     },
     {
@@ -380,7 +503,7 @@
       "space": "Content Metrics",
       "validation_sql": "SELECT COALESCE(SUM(count), 0) as answer FROM core_dev.techops.image_deliveries WHERE delivery_date = current_date()",
       "check": "percentage",
-      "tolerance": 0.10,
+      "tolerance": 0.1,
       "expected_table": "image_deliveries"
     },
     {
@@ -389,7 +512,7 @@
       "space": "Content Metrics",
       "validation_sql": "SELECT COALESCE(SUM(count), 0) as answer FROM core_dev.techops.image_deliveries WHERE delivery_date >= date_trunc('week', current_date())",
       "check": "percentage",
-      "tolerance": 0.10,
+      "tolerance": 0.1,
       "expected_table": "image_deliveries"
     },
     {
@@ -415,7 +538,7 @@
       "space": "Content Metrics",
       "validation_sql": "SELECT COUNT(DISTINCT content_id) as answer FROM core_dev.techops.policy_window_snapshots WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM core_dev.techops.policy_window_snapshots) AND policy_disabled = true",
       "check": "percentage",
-      "tolerance": 0.10,
+      "tolerance": 0.1,
       "expected_table": "policy_window_snapshots"
     },
     {
@@ -630,7 +753,7 @@
       "space": "Content Library",
       "validation_sql": "SELECT COUNT(*) as answer FROM core_dev.techops.content_library WHERE has_video = false",
       "check": "percentage",
-      "tolerance": 0.10,
+      "tolerance": 0.1,
       "expected_table": "content_library"
     },
     {
@@ -655,7 +778,7 @@
       "space": "Content Library",
       "validation_sql": "SELECT COUNT(*) as answer FROM core_dev.techops.content_library WHERE first_live_date IS NULL",
       "check": "percentage",
-      "tolerance": 0.10,
+      "tolerance": 0.1,
       "expected_table": "content_library"
     },
     {
@@ -664,7 +787,7 @@
       "space": "Content Metrics",
       "validation_sql": "SELECT SUM(count) as answer FROM core_dev.techops.qa_abf_summary WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM core_dev.techops.qa_abf_summary) AND metric_type = 'current_queue' AND status = 'INTERNAL_REVIEW'",
       "check": "percentage",
-      "tolerance": 0.10,
+      "tolerance": 0.1,
       "expected_table": "qa_abf_summary"
     },
     {
@@ -673,7 +796,7 @@
       "space": "Content Metrics",
       "validation_sql": "SELECT SUM(count) as answer FROM core_dev.techops.qa_abf_summary WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM core_dev.techops.qa_abf_summary) AND metric_type = 'monthly_review' AND status = 'DONE' AND month = date_trunc('month', current_date())",
       "check": "percentage",
-      "tolerance": 0.10,
+      "tolerance": 0.1,
       "expected_table": "qa_abf_summary"
     },
     {

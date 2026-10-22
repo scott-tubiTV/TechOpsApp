@@ -9,15 +9,12 @@ MODEL = "databricks-claude-haiku-4-5"
 
 SYSTEM_PROMPT = """You are a query router for a data analytics system. You have access to the following data spaces:
 
-1. Content Metrics — Ops metrics: policy snapshots, avails status, imports, images, partners, QA/ABF queue sizes, workload, content refresh. Questions about counts, totals, trends, queues, how many titles, monthly/weekly aggregates.
-2. Redeliveries — Redelivery detail: per-title breakdown by reason, modality (video/image/subtitle), age, partner, dismissal status. Questions about redeliveries in general, overdue, backlog, dismissed, open redeliveries across the board.
-3. Dupe Checker V2 — Duplicate title detection: CSV avails checking for existing titles and conflicts. Questions about dupes, duplicates, conflicts, overlapping titles, territory overlap.
-4. Partner Detail — Per-partner health: error rates, redeliveries by partner, pipeline failures, ABF errors, POC info. Questions about specific partners (Sony, Paramount, NBCU, Lionsgate, etc.), partner error rates, partner health, which partners have issues.
-5. Content Library — Per-title metadata lookup: individual title info by name, content type, partner, internal tags (creator_content, same_day_content, tubi_original), live status, policy windows, genres, assets. Questions about specific titles, looking up a title, which titles have a tag, is a title live, what partner owns a title.
+1. Backlog — The content pipeline backlog from DSA's CDP Backlog Data Model, one row per title (movie or episode) per daily snapshot. Pipeline stage (ABF Incomplete, ABF Complete, In Refresh, Ready to Publish, Published), ABF review queue, metadata status, refresh status, policy windows (US and non-US), blocking gates, deals and fees, launch failures, publish readiness, days in pipeline, creator content. Questions about the backlog, what is in the pipeline, how many titles are at a stage, what is blocked, what is ready to publish, deal fees, launch failures.
+2. Redeliveries — Redelivery detail: per-title breakdown by reason, modality (video/image/subtitle), age, partner, dismissal status. Questions about redeliveries in general, overdue redeliveries, dismissed or open redeliveries, redeliveries by reason or modality.
 
 Given a user question, determine:
 - Is this a SINGLE-space question (can be fully answered by one space)?
-- Or is this a MULTI-space question (requires data from multiple spaces)?
+- Or is this a MULTI-space question (requires data from both spaces)?
 
 Respond ONLY with valid JSON in this exact format:
 {
@@ -29,15 +26,12 @@ Respond ONLY with valid JSON in this exact format:
 }
 
 Rules:
-- If the question mentions a specific partner by name AND asks about their health/errors/issues, route to "Partner Detail".
-- If the question asks about redeliveries in general (across all partners, or by modality/reason), route to "Redeliveries".
-- If the question asks about specific titles, title-level metadata, internal tags, or wants to look up/find individual titles, route to "Content Library".
-- If the question asks about aggregate counts/trends (how many titles imported this month, queue sizes), route to "Content Metrics".
-- If the question combines partner-specific data with general metrics or general redelivery data, it's MULTI-space.
+- Questions about the pipeline, backlog, ABF queue, metadata, refresh, policy windows, deals, launch failures or publish readiness go to "Backlog".
+- Questions about redeliveries (reason, modality, age, dismissed, overdue, per-partner redelivery detail) go to "Redeliveries". A bare count of titles that have an open redelivery can be answered by "Backlog", but anything about the redeliveries themselves goes to "Redeliveries".
+- If the question combines pipeline/backlog data with redelivery detail, it is MULTI-space.
 - When splitting a multi-space question, each sub_query must be self-contained and answerable by its target space alone.
-- Never route to more than 3 spaces for a single question.
-- If unsure, prefer single-space routing.
-- The space_name must be exactly one of: "Content Metrics", "Redeliveries", "Dupe Checker V2", "Partner Detail", "Content Library"."""
+- If unsure, prefer single-space routing, and prefer "Backlog".
+- The space_name must be exactly one of: "Backlog", "Redeliveries"."""
 
 
 @dataclass
@@ -75,7 +69,7 @@ class QueryDecomposer:
             cleaned = cleaned.strip()
 
         data = json.loads(cleaned)
-        valid_spaces = {"Content Metrics", "Redeliveries", "Dupe Checker V2", "Partner Detail", "Content Library"}
+        valid_spaces = {"Backlog", "Redeliveries"}
 
         sub_queries = []
         for space in data.get("spaces", []):

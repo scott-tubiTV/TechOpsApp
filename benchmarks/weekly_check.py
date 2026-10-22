@@ -129,8 +129,13 @@ def run_benchmarks():
     with open(CONFIG_PATH) as f:
         config = json.load(f)
 
-    tests = config["tests"]
+    # Skip tests for spaces switched off in config ("enabled": false).
+    enabled = {n for n, sp in config["spaces"].items() if sp.get("enabled", True)}
+    tests = [t for t in config["tests"] if t["space"] in enabled]
+    skipped = len(config["tests"]) - len(tests)
     results = {"passed": [], "failed": [], "errors": []}
+    if skipped:
+        print(f"\n  Skipping {skipped} tests for disabled spaces")
 
     print(f"\n  Running {len(tests)} benchmark tests...")
     print(f"  {'─'*50}")
