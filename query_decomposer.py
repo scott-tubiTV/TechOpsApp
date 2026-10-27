@@ -9,12 +9,13 @@ MODEL = "databricks-claude-haiku-4-5"
 
 SYSTEM_PROMPT = """You are a query router for a data analytics system. You have access to the following data spaces:
 
-1. Backlog — The content pipeline backlog from DSA's CDP Backlog Data Model, one row per title (movie or episode) per daily snapshot. Pipeline stage (ABF Incomplete, ABF Complete, In Refresh, Ready to Publish, Published), ABF review queue, metadata status, refresh status, policy windows (US and non-US), blocking gates, deals and fees, launch failures, publish readiness, days in pipeline, creator content. Questions about the backlog, what is in the pipeline, how many titles are at a stage, what is blocked, what is ready to publish, deal fees, launch failures.
-2. Redeliveries — Redelivery detail: per-title breakdown by reason, modality (video/image/subtitle), age, partner, dismissal status. Questions about redeliveries in general, overdue redeliveries, dismissed or open redeliveries, redeliveries by reason or modality.
+1. Backlog — The content pipeline backlog from DSA's CDP Backlog Data Model, one row per title (movie or episode) per daily snapshot. Pipeline stage (ABF Incomplete, ABF Complete, In Refresh, Ready to Publish, Published), ABF review queue, metadata status, refresh status, policy windows (US and non-US), blocking gates, deals and fees, launch failures, publish readiness, days in pipeline, creator content. Questions about the backlog, what is in the pipeline, how many titles are at a stage, what is blocked, what is ready to publish, pipeline-side deal fees, launch failures.
+2. Acquisitions — Content acquisition deals from the Partnerships team's Airtable export (refreshed weekly, latest state only, no history): which titles are licensed, license windows and expirations, territories, exclusivity, fees and spend, budget category (Library, Shiny, Original, Elite, Niche), strategic vertical, CAP lead, deal type, renewals. Questions about what a deal costs, total spend or fees, what is expiring or up for renewal, exclusivity, budget category or strategic vertical.
+3. Redeliveries — Redelivery detail: per-title breakdown by reason, modality (video/image/subtitle), age, partner, dismissal status. Questions about redeliveries in general, overdue redeliveries, dismissed or open redeliveries, redeliveries by reason or modality.
 
 Given a user question, determine:
 - Is this a SINGLE-space question (can be fully answered by one space)?
-- Or is this a MULTI-space question (requires data from both spaces)?
+- Or is this a MULTI-space question (requires data from more than one space)?
 
 Respond ONLY with valid JSON in this exact format:
 {
@@ -26,12 +27,13 @@ Respond ONLY with valid JSON in this exact format:
 }
 
 Rules:
-- Questions about the pipeline, backlog, ABF queue, metadata, refresh, policy windows, deals, launch failures or publish readiness go to "Backlog".
+- Questions about the pipeline, backlog, ABF queue, metadata, refresh, policy windows, launch failures or publish readiness go to "Backlog".
+- Questions about license windows or expirations, fees, spend, cost, exclusivity, budget category, strategic vertical, CAP lead, deal type or renewals go to "Acquisitions". Fee and spend questions go to "Acquisitions" unless the user explicitly asks about the pipeline or backlog.
 - Questions about redeliveries (reason, modality, age, dismissed, overdue, per-partner redelivery detail) go to "Redeliveries". A bare count of titles that have an open redelivery can be answered by "Backlog", but anything about the redeliveries themselves goes to "Redeliveries".
-- If the question combines pipeline/backlog data with redelivery detail, it is MULTI-space.
+- If the question combines data from different spaces (for example pipeline stage with acquisition fees, or backlog with redelivery detail), it is MULTI-space.
 - When splitting a multi-space question, each sub_query must be self-contained and answerable by its target space alone.
 - If unsure, prefer single-space routing, and prefer "Backlog".
-- The space_name must be exactly one of: "Backlog", "Redeliveries"."""
+- The space_name must be exactly one of: "Backlog", "Acquisitions", "Redeliveries"."""
 
 
 @dataclass
@@ -69,7 +71,7 @@ class QueryDecomposer:
             cleaned = cleaned.strip()
 
         data = json.loads(cleaned)
-        valid_spaces = {"Backlog", "Redeliveries"}
+        valid_spaces = {"Backlog", "Acquisitions", "Redeliveries"}
 
         sub_queries = []
         for space in data.get("spaces", []):
