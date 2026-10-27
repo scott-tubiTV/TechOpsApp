@@ -55,9 +55,15 @@ TOOLS = {
 ALL_GENIE_SPACES = {
     "Backlog": {
         "id": os.environ.get("GENIE_SPACE_BACKLOG", "01f1ce6a6277168eb56328bf39c68712"),
-        "description": "Content pipeline backlog from DSA's CDP Backlog Data Model: pipeline stage, ABF queue, metadata, refresh, policy windows, deals, launch failures, publish readiness",
-        "keywords": ["backlog", "pipeline", "stage", "abf", "queue", "metadata", "refresh", "window", "deal", "fee", "launch", "publish", "ready to publish", "blocking", "gate", "how many titles", "in window", "creator"],
+        "description": "Content pipeline backlog from DSA's CDP Backlog Data Model: pipeline stage, ABF queue, metadata, refresh, policy windows, pipeline-side deal fees, launch failures, publish readiness",
+        "keywords": ["backlog", "pipeline", "stage", "abf", "queue", "metadata", "refresh", "window", "launch", "publish", "ready to publish", "blocking", "gate", "how many titles", "in window", "creator"],
         "color": "#a855f7",
+    },
+    "Acquisitions": {
+        "id": os.environ.get("GENIE_SPACE_ACQUISITIONS", "01f1d254035f15fd815045e267138e69"),
+        "description": "Content acquisition deals: license windows and expirations, fees and spend, exclusivity, territories, budget category, strategic vertical, CAP lead, renewals",
+        "keywords": ["acquisition", "acquire", "license", "licence", "expir", "renewal", "renew", "exclusiv", "fee", "spend", "cost", "budget", "deal", "cap lead", "strategic vertical", "vertical", "perpetual", "recoup", "shiny", "elite", "niche", "library"],
+        "color": "#ef4444",
     },
     "Content Metrics": {
         "id": os.environ.get("GENIE_SPACE_TECHOPS", "01f18b97de0117d8af61d23c1eaa8d7e"),
@@ -93,7 +99,7 @@ ALL_GENIE_SPACES = {
 
 # Spaces the router and UI use. Content Metrics, Dupe Checker V2, Partner Detail and Content Library
 # are switched off while Argo is pointed at the DSA backlog data model; add a name here to re-enable.
-ENABLED_SPACES = ["Backlog", "Redeliveries"]
+ENABLED_SPACES = ["Backlog", "Acquisitions", "Redeliveries"]
 GENIE_SPACES = {name: cfg for name, cfg in ALL_GENIE_SPACES.items() if name in ENABLED_SPACES}
 
 SUGGESTION_CARDS = [

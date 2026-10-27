@@ -17,6 +17,9 @@
     },
     "Backlog": {
       "id": "01f1ce6a6277168eb56328bf39c68712"
+    },
+    "Acquisitions": {
+      "id": "01f1d254035f15fd815045e267138e69"
     }
   },
   "warehouse_id": "a6b9541289d75c6e",
@@ -822,6 +825,86 @@
       "validation_sql": "SELECT team, SUM(count) as total FROM core_dev.techops.qa_abf_summary WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM core_dev.techops.qa_abf_summary) AND metric_type = 'current_queue' AND status IN ('PENDING_REVIEW', 'INTERNAL_REVIEW') GROUP BY team ORDER BY total DESC",
       "check": "table_used",
       "expected_table": "qa_abf_summary"
+    },
+    {
+      "id": "acq_total_titles",
+      "question": "How many distinct titles are in the acquisitions data?",
+      "space": "Acquisitions",
+      "validation_sql": "SELECT COUNT(DISTINCT ltrim('0', program_id)) AS answer FROM core_dev.techops.content_acquistions_priority_titles",
+      "check": "percentage",
+      "tolerance": 0.02,
+      "expected_table": "content_acquistions_priority_titles"
+    },
+    {
+      "id": "acq_total_fees",
+      "question": "What are the total license fees across all acquisitions?",
+      "space": "Acquisitions",
+      "validation_sql": "WITH fees AS (SELECT * FROM core_dev.techops.content_acquistions_priority_titles QUALIFY row_number() OVER (PARTITION BY ltrim('0', program_id), exploited_country, start_date, end_date, total_fee ORDER BY created, id) = 1) SELECT SUM(total_fee) AS answer FROM fees",
+      "check": "percentage",
+      "tolerance": 0.02,
+      "expected_table": "content_acquistions_priority_titles"
+    },
+    {
+      "id": "acq_fees_original",
+      "question": "What are the total fees for Original budget category titles?",
+      "space": "Acquisitions",
+      "validation_sql": "WITH fees AS (SELECT * FROM core_dev.techops.content_acquistions_priority_titles QUALIFY row_number() OVER (PARTITION BY ltrim('0', program_id), exploited_country, start_date, end_date, total_fee ORDER BY created, id) = 1) SELECT SUM(total_fee) AS answer FROM fees WHERE budget_category = 'Original'",
+      "check": "percentage",
+      "tolerance": 0.02,
+      "expected_table": "content_acquistions_priority_titles"
+    },
+    {
+      "id": "acq_expiring_90",
+      "question": "How many titles have a license window ending in the next 90 days?",
+      "space": "Acquisitions",
+      "validation_sql": "SELECT COUNT(DISTINCT ltrim('0', program_id)) AS answer FROM core_dev.techops.content_acquistions_priority_titles WHERE to_date(end_date) BETWEEN current_date() AND date_add(current_date(), 90)",
+      "check": "percentage",
+      "tolerance": 0.02,
+      "expected_table": "content_acquistions_priority_titles"
+    },
+    {
+      "id": "acq_fees_vertical_this_year",
+      "question": "What are total fees for windows starting this year in the Audience Engagement strategic vertical?",
+      "space": "Acquisitions",
+      "validation_sql": "WITH fees AS (SELECT * FROM core_dev.techops.content_acquistions_priority_titles QUALIFY row_number() OVER (PARTITION BY ltrim('0', program_id), exploited_country, start_date, end_date, total_fee ORDER BY created, id) = 1) SELECT SUM(total_fee) AS answer FROM fees WHERE year(to_date(start_date)) = year(current_date()) AND strategic_vertical = 'Audience Engagement'",
+      "check": "percentage",
+      "tolerance": 0.02,
+      "expected_table": "content_acquistions_priority_titles"
+    },
+    {
+      "id": "acq_top_studio_fees",
+      "question": "Which studio has the highest total fees?",
+      "space": "Acquisitions",
+      "validation_sql": "WITH fees AS (SELECT * FROM core_dev.techops.content_acquistions_priority_titles QUALIFY row_number() OVER (PARTITION BY ltrim('0', program_id), exploited_country, start_date, end_date, total_fee ORDER BY created, id) = 1) SELECT SUM(total_fee) AS answer, studio FROM fees GROUP BY studio ORDER BY answer DESC LIMIT 1",
+      "check": "percentage",
+      "tolerance": 0.02,
+      "expected_table": "content_acquistions_priority_titles"
+    },
+    {
+      "id": "acq_active_us_non_exclusive",
+      "question": "How many active US titles are Non-Exclusive?",
+      "space": "Acquisitions",
+      "validation_sql": "SELECT COUNT(DISTINCT ltrim('0', program_id)) AS answer FROM core_dev.techops.content_acquistions_priority_titles WHERE exploited_country = 'US' AND current_date() BETWEEN to_date(start_date) AND to_date(end_date) AND exclusivity_dropdown[0] = 'Non-Exclusive'",
+      "check": "percentage",
+      "tolerance": 0.02,
+      "expected_table": "content_acquistions_priority_titles"
+    },
+    {
+      "id": "acq_active_au_nz",
+      "question": "How many active titles are there in Australia and New Zealand?",
+      "space": "Acquisitions",
+      "validation_sql": "SELECT COUNT(DISTINCT ltrim('0', program_id)) AS answer FROM core_dev.techops.content_acquistions_priority_titles WHERE territory_mapping IN ('AU', 'NZ') AND current_date() BETWEEN to_date(start_date) AND to_date(end_date)",
+      "check": "percentage",
+      "tolerance": 0.02,
+      "expected_table": "content_acquistions_priority_titles"
+    },
+    {
+      "id": "acq_fees_table_used",
+      "question": "Which budget categories have the highest total fees?",
+      "space": "Acquisitions",
+      "validation_sql": "WITH fees AS (SELECT * FROM core_dev.techops.content_acquistions_priority_titles QUALIFY row_number() OVER (PARTITION BY ltrim('0', program_id), exploited_country, start_date, end_date, total_fee ORDER BY created, id) = 1) SELECT budget_category, SUM(total_fee) AS answer FROM fees GROUP BY budget_category ORDER BY answer DESC",
+      "check": "table_used",
+      "expected_table": "content_acquistions_priority_titles"
     }
   ]
 }

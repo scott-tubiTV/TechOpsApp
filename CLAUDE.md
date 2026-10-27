@@ -56,6 +56,7 @@ app.py  (Streamlit UI — displays answer + dataframe + SQL)
 | Dupe Checker V2 | `01f122f4e2921b7a9c28ef03d0812ee6` | v_dupe_checker_titles, v_dupe_checker_policy_windows |
 | Partner Detail | `01f1912d11a91341b59b2836ca3777c6` | partner_health, partner_issues |
 | Content Library | `01f1951ff07e199aa6d9c0718f342e35` | content_library |
+| Acquisitions | `01f1d254035f15fd815045e267138e69` | content_acquistions_priority_titles (sic; Airtable export, weekly, latest state only). Fees must be deduplicated, see `notebooks/acquisitions_genie_instructions.md` |
 
 ## How to Add a New Genie Space
 
@@ -113,9 +114,9 @@ Rules:
 - Always preserve `"version": 2`
 - The table field name is `identifier` (not `name` or `table_name`)
 
-### Step 4: Wire into the LLM Router (4 locations)
+### Step 4: Wire into the LLM Router (5 locations)
 
-1. **`app.py` → `GENIE_SPACES` dict** — add entry with id, description, keywords, color
+1. **`app.py` → `ALL_GENIE_SPACES` dict** — add entry with id, description, keywords, color, and add the name to `ENABLED_SPACES` (spaces not listed there are switched off)
 2. **`query_decomposer.py` → `SYSTEM_PROMPT`** — add numbered entry describing the space
 3. **`query_decomposer.py` → `valid_spaces` set** — add exact space name string
 4. **`benchmarks/config.json`** — add space to `spaces` dict and add test cases
