@@ -56,13 +56,13 @@ ALL_GENIE_SPACES = {
     "Backlog": {
         "id": os.environ.get("GENIE_SPACE_BACKLOG", "01f1ce6a6277168eb56328bf39c68712"),
         "description": "Content pipeline backlog from DSA's CDP Backlog Data Model: pipeline stage, ABF queue, metadata, refresh, policy windows, pipeline-side deal fees, launch failures, publish readiness",
-        "keywords": ["backlog", "pipeline", "stage", "abf", "queue", "metadata", "refresh", "window", "launch", "publish", "ready to publish", "blocking", "gate", "how many titles", "in window", "creator"],
+        "keywords": ["backlog", "pipeline", "stage", "abf", "queue", "metadata", "refresh", "window", "deal", "launch", "publish", "ready to publish", "blocking", "gate", "how many titles", "in window", "creator"],
         "color": "#a855f7",
     },
     "Acquisitions": {
         "id": os.environ.get("GENIE_SPACE_ACQUISITIONS", "01f1d254035f15fd815045e267138e69"),
         "description": "Content acquisition deals: license windows and expirations, fees and spend, exclusivity, territories, budget category, strategic vertical, CAP lead, renewals",
-        "keywords": ["acquisition", "acquire", "license", "licence", "expir", "renewal", "renew", "exclusiv", "fee", "spend", "cost", "budget", "deal", "cap lead", "strategic vertical", "vertical", "perpetual", "recoup", "shiny", "elite", "niche", "library"],
+        "keywords": ["acquisition", "acquire", "license", "licence", "expir", "renewal", "renew", "exclusiv", "fee", "spend", "budget", "cap lead", "strategic vertical", "perpetual", "recoup", "shiny", "elite", "niche"],
         "color": "#ef4444",
     },
     "Content Metrics": {
